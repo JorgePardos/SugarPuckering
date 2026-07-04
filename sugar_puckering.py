@@ -1,5 +1,5 @@
 """
-app_desktop.py
+sugar_puckering.py
 Main GUI application for Sugar Puckering Analyzer.
 Bridges the mathematical engine and the visualization tools using Tkinter.
 """
@@ -19,7 +19,7 @@ class PuckeringApp:
         """Initializes the Tkinter main window and GUI layout."""
         self.root = root
         self.root.title("Sugar Puckering Analyzer")
-        self.root.geometry("550x450")
+        self.root.geometry("550x550") # Slightly taller to fit the new field
         
         # Internal variables
         self.mode_var = tk.StringVar(value="PDB")
@@ -28,6 +28,7 @@ class PuckeringApp:
         self.top_path = tk.StringVar()
         self.traj_path = tk.StringVar()
         self.fel_path = tk.StringVar() 
+        self.job_name_var = tk.StringVar() # New variable for Output Folder Name
         
         # Header
         tk.Label(root, text="Conformational Analysis", font=("Helvetica", 14, "bold")).pack(pady=10)
@@ -50,9 +51,16 @@ class PuckeringApp:
         self.entry_idx = tk.Entry(self.frame_idx, width=40)
         self.entry_idx.pack(anchor="w", pady=5)
         self.entry_idx.insert(0, "Ex: 11 12 13 14 15 16")
+
+        # Output Folder / Job Name Frame
+        self.frame_output = tk.Frame(root)
+        self.frame_output.pack(pady=15, fill="x", padx=20)
+        tk.Label(self.frame_output, text="Output Folder / Job Name (leave blank for default):").pack(anchor="w")
+        self.entry_job = tk.Entry(self.frame_output, textvariable=self.job_name_var, width=40)
+        self.entry_job.pack(anchor="w", pady=5)
         
         # Execute Button
-        tk.Button(root, text="Run Analysis", bg="darkblue", fg="white", font=("Helvetica", 12, "bold"), command=self.run_analysis).pack(pady=20)
+        tk.Button(root, text="Run Analysis", bg="darkblue", fg="white", font=("Helvetica", 12, "bold"), command=self.run_analysis).pack(pady=10)
         
         # Initialize default view
         self.update_gui()
@@ -66,13 +74,13 @@ class PuckeringApp:
         mode = self.mode_var.get()
         
         if mode == "PDB":
-            self.frame_idx.pack(before=self.root.winfo_children()[-1], fill="x", padx=20) 
+            self.frame_idx.pack(before=self.frame_output, fill="x", padx=20) 
             tk.Label(self.frame_files, text="PDB File(s):").grid(row=0, column=0, sticky="w", pady=5)
             tk.Entry(self.frame_files, textvariable=self.single_pdb_path, width=35).grid(row=0, column=1, padx=5)
             tk.Button(self.frame_files, text="Browse", command=lambda: self.browse_file(self.single_pdb_path, "pdb")).grid(row=0, column=2)
             
         elif mode == "MD":
-            self.frame_idx.pack(before=self.root.winfo_children()[-1], fill="x", padx=20) 
+            self.frame_idx.pack(before=self.frame_output, fill="x", padx=20) 
             tk.Label(self.frame_files, text="Topology (.prmtop, .pdb):").grid(row=0, column=0, sticky="w", pady=5)
             tk.Entry(self.frame_files, textvariable=self.top_path, width=35).grid(row=0, column=1, padx=5)
             tk.Button(self.frame_files, text="Browse", command=lambda: self.browse_file(self.top_path, "top")).grid(row=0, column=2)
@@ -120,9 +128,17 @@ class PuckeringApp:
                 if data.shape[1] < 3:
                     messagebox.showerror("Format Error", "File must contain at least 3 columns: Theta, Phi, Energy")
                     return
+                
+                # Setup output names
                 base_name = os.path.splitext(os.path.basename(fel_file))[0]
-                plot_fel_mercator(data, base_name)
-                messagebox.showinfo("Success", f"FEL plot successfully generated as {base_name}_FEL.png")
+                user_job_name = self.job_name_var.get().strip()
+                final_job_name = user_job_name if user_job_name else base_name
+                
+                os.makedirs(final_job_name, exist_ok=True)
+                save_prefix = os.path.join(final_job_name, final_job_name)
+                
+                plot_fel_mercator(data, save_prefix)
+                messagebox.showinfo("Success", f"FEL plot successfully generated in folder '{final_job_name}'")
                 return
 
             # === STRUCTURAL MODES (PDB & MD) ===
@@ -148,6 +164,7 @@ class PuckeringApp:
                 
                 print(f"Loading {len(self.pdb_files_list)} PDB file(s)...")
                 sugar_traj = md.load(self.pdb_files_list, atom_indices=mdtraj_indices)
+                
                 base_name = os.path.splitext(os.path.basename(self.pdb_files_list[0]))[0]
                 if len(self.pdb_files_list) > 1: 
                     base_name += "_multi"
@@ -163,6 +180,13 @@ class PuckeringApp:
                 sugar_traj = md.load(traj_file, top=top_file, atom_indices=mdtraj_indices)
                 base_name = os.path.splitext(os.path.basename(traj_file))[0]
             
+            # Setup output names and directories
+            user_job_name = self.job_name_var.get().strip()
+            final_job_name = user_job_name if user_job_name else base_name
+            
+            os.makedirs(final_job_name, exist_ok=True)
+            save_prefix = os.path.join(final_job_name, final_job_name)
+            
             # Trajectory calculations
             output_data = np.zeros((sugar_traj.n_frames, 4), dtype=float)
             for frame in range(sugar_traj.n_frames):
@@ -172,7 +196,7 @@ class PuckeringApp:
                 output_data[frame, :] = [frame, Q, theta, phi]
             
             # Write tabulated parameters to output .dat file
-            dat_filename = f"{base_name}_params.dat"
+            dat_filename = f"{save_prefix}_params.dat"
             with open(dat_filename, "w") as dat_file:
                 dat_file.write(f"{'Frame':>8}  {'Q(A)':>8}  {'Theta(deg)':>12}  {'Phi(deg)':>12}  {'Conformation':>14}\n")
                 dat_file.write("-" * 62 + "\n")
@@ -188,16 +212,16 @@ class PuckeringApp:
 
             # Provide UI Feedback
             if sugar_traj.n_frames == 1:
-                msg = f"Analysis complete.\nData saved in {dat_filename}\n\nConformation: {conf_texto}"
+                msg = f"Analysis complete.\nData saved in folder '{final_job_name}'\n\nConformation: {conf_texto}"
                 messagebox.showinfo("Success", msg)
             else:
-                msg = f"Trajectory processed ({sugar_traj.n_frames} frames).\nData saved in {dat_filename}.\nPlots will launch next."
+                msg = f"Trajectory processed ({sugar_traj.n_frames} frames).\nData saved in folder '{final_job_name}'.\nPlots will launch next."
                 messagebox.showinfo("Success", msg)
             
             # Trigger plotting functions
             if sugar_traj.n_frames > 1:
-                plot_time_series(output_data, base_name)
-            plot_mercator(output_data, base_name)
+                plot_time_series(output_data, save_prefix)
+            plot_mercator(output_data, save_prefix)
             
         except Exception as e:
             messagebox.showerror("Execution Error", f"An error occurred:\n{str(e)}")
