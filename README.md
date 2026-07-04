@@ -15,11 +15,20 @@ This tool is designed to analyze static PDB structures, Molecular Dynamics (MD) 
 The mathematical implementation and the Stoddart mapping are based on:
 > *Ardèvol, A., Biarnés, X., Planas, A., & Rovira, C. (2010). The Conformational Free-Energy Landscape of $\beta$-D-Mannopyranose: Evidence for a 1S5 -> B2,5 -> OS2 Catalytic Itinerary in $\beta$-Mannosidases. Journal of the American Chemical Society, 132(45), 16058-16065.*
 
-## 🛠️ Installation (Development)
+## 🛠️ Installation Guide
 
-Clone this repository and install the dependencies:
+You can run **Sugar Puckering Analyzer** either from the Python source code or by creating a standalone executable.
 
+### Option A: From Source (For Developers/Researchers)
+
+**Prerequisites:** [Python 3.8+](https://www.python.org/) and `git`.
+
+1. **Clone the repository:**
 ```bash
-git clone [https://github.com/tu-usuario/SugarPuckering.git](https://github.com/tu-usuario/SugarPuckering.git)
+git clone [https://github.com/TU_USUARIO/SugarPuckering.git](https://github.com/TU_USUARIO/SugarPuckering.git)
 cd SugarPuckering
-pip install -r requirements.txt
+
+2. Install 
+pip install pyinstaller
+pyinstaller --onefile --windowed --collect-all mdtraj --hidden-import PIL._tkinter_finder --hidden-import scipy.interpolate sugar_puckering.py
+
