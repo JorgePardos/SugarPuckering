@@ -1,0 +1,12 @@
+# Ignorar compilation folders
+build/
+dist/
+*.spec
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore local outputs
+*.dat
+*.png
