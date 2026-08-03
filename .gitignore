@@ -6,7 +6,16 @@ dist/
 # Ignore Python cache
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Ignore local outputs
 *.dat
 *.png
+ToDo.txt
+
+# Research inputs used by tests/test_real_data.py: hundreds of MB of trajectory
+# plus topologies, too large for the repo. Those tests skip when they are absent.
+tests/data/
+
+# Reference papers are copyrighted; keep them local, out of the public repo.
+*.pdf
