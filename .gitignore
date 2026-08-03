@@ -11,7 +11,7 @@ __pycache__/
 # Ignore local outputs
 *.dat
 *.png
-ToDo.txt
+
 
 # Research inputs used by tests/test_real_data.py: hundreds of MB of trajectory
 # plus topologies, too large for the repo. Those tests skip when they are absent.
