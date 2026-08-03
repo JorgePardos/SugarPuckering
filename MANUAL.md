@@ -25,7 +25,7 @@ For installation see [README.md](README.md). This document assumes the program a
 | Mode | Input | Answers |
 |---|---|---|
 | **Static PDB(s)** | one or more `.pdb` | what conformation is this structure in? |
-| **MD Trajectory** | topology + trajectory | how does the conformation evolve? |
+| **(QMMM) MD Trajectory** | topology + trajectory | how does the conformation evolve? |
 | **Free Energy (FEL)** | a pre-computed surface | what does the landscape look like? |
 
 Both front ends do the same work and share the same defaults.
