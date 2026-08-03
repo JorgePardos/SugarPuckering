@@ -400,6 +400,51 @@ def load_fel(path):
     return data, field_names
 
 
+def parse_energy_max(value):
+    """
+    Parses the FEL colour-scale cap typed by a user.
+
+    Accepts a number, the word "auto", or blank/None for "use the whole sampled
+    range". Shared by the GUI and the CLI so both reject the same things with the
+    same message.
+
+    Raises:
+        AnalysisError: on anything else.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.lower() == "auto":
+        return "auto"
+    try:
+        return float(text)
+    except ValueError:
+        raise AnalysisError(
+            f"Max energy must be a number, 'auto', or left blank; got {value!r}."
+        ) from None
+
+
+def parse_contour_step(value, default=1.0):
+    """
+    Parses the contour spacing, in the energy unit of the data.
+
+    Raises:
+        AnalysisError: if it is not a positive number.
+    """
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return default
+    try:
+        step = float(text)
+    except ValueError:
+        raise AnalysisError(f"Contour spacing must be a number; got {value!r}.") from None
+    if step <= 0:
+        raise AnalysisError(f"Contour spacing must be greater than zero; got {step}.")
+    return step
+
+
 def prepare_output_dir(job_name, base_name, output_root="."):
     """
     Creates the job directory and returns the prefix shared by every output file.

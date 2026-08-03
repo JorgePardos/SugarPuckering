@@ -25,6 +25,8 @@ from src.analysis import (  # noqa: E402
     describe_conformation,
     load_fel,
     load_ring_coordinates,
+    parse_contour_step,
+    parse_energy_max,
     parse_indices,
     prepare_output_dir,
     write_params_dat,
@@ -47,7 +49,7 @@ class PuckeringApp:
         """Initializes the Tkinter main window and GUI layout."""
         self.root = root
         self.root.title("Sugar Puckering Analyzer")
-        self.root.geometry("560x580")
+        self.root.geometry("620x760")
 
         # Internal variables
         self.mode_var = tk.StringVar(value="PDB")
@@ -63,6 +65,17 @@ class PuckeringApp:
         self.job_name_var = tk.StringVar()
         self.status_var = tk.StringVar(value="")
         self.is_running = False
+
+        # Plot options. Defaults deliberately mirror the CLI defaults, so the two
+        # front ends produce the same figure from the same inputs.
+        self.angle_units_var = tk.StringVar(value="auto")
+        self.energy_label_var = tk.StringVar(value="Free Energy (kcal/mol)")
+        self.contour_step_var = tk.StringVar(value="1")
+        self.cmap_var = tk.StringVar(value="viridis")
+        self.energy_max_var = tk.StringVar(value="")
+        self.unsampled_var = tk.StringVar(value="mask")
+        self.overlay_fel_path = tk.StringVar()
+        self.skip_ring_check_var = tk.BooleanVar(value=False)
 
         # Header
         tk.Label(root, text="Conformational Analysis",
@@ -96,6 +109,9 @@ class PuckeringApp:
                  fg="gray", font=("Helvetica", 9, "italic")).pack(anchor="w")
         self.entry_idx = tk.Entry(self.frame_idx, width=40)
         self.entry_idx.pack(anchor="w", pady=5)
+
+        # Plot options, rebuilt per mode by update_gui()
+        self.frame_options = tk.LabelFrame(root, text="Plot options", padx=10, pady=6)
 
         # Output Folder / Job Name Frame
         self.frame_output = tk.Frame(root)
@@ -141,11 +157,94 @@ class PuckeringApp:
             self.frame_idx.pack_forget()  # indices are not used by a pre-computed FEL
             self._add_file_row(0, "FEL Data (.dat, .txt):", self.fel_path, "fel")
 
+        self._build_options(mode)
+
     def _add_file_row(self, row, label, variable, file_type):
         tk.Label(self.frame_files, text=label).grid(row=row, column=0, sticky="w", pady=5)
         tk.Entry(self.frame_files, textvariable=variable, width=35).grid(row=row, column=1, padx=5)
         tk.Button(self.frame_files, text="Browse",
                   command=lambda: self.browse_file(variable, file_type)).grid(row=row, column=2)
+
+    # -- plot options ------------------------------------------------------
+
+    def _build_options(self, mode):
+        """
+        Rebuilds the options panel for the current mode.
+
+        Everything here has a command-line equivalent; the flag name is shown in
+        the tooltip-style hint so a GUI run can be reproduced from a script.
+        """
+        for widget in self.frame_options.winfo_children():
+            widget.destroy()
+        self.frame_options.pack(before=self.frame_output, fill="x", padx=20, pady=(0, 4))
+
+        row = 0
+        if mode == "FEL":
+            row = self._add_fel_options(row)
+        else:
+            tk.Checkbutton(self.frame_options,
+                           text="Skip the closed-ring check  (--skip-ring-check)",
+                           variable=self.skip_ring_check_var).grid(
+                row=row, column=0, columnspan=3, sticky="w")
+            row += 1
+
+            tk.Label(self.frame_options, text="Project onto FEL (optional):").grid(
+                row=row, column=0, sticky="w", pady=2)
+            tk.Entry(self.frame_options, textvariable=self.overlay_fel_path,
+                     width=24).grid(row=row, column=1, sticky="w", padx=4)
+            tk.Button(self.frame_options, text="Browse",
+                      command=lambda: self.browse_file(self.overlay_fel_path, "fel")).grid(
+                row=row, column=2, sticky="w")
+            row += 1
+            # Those two describe the projected surface, so they only matter here
+            # once a surface has been chosen.
+            row = self._add_option_menu(row, "Angle units:", self.angle_units_var,
+                                        ["auto", "deg", "rad"], "--angle-units")
+            row = self._add_entry(row, "Energy label:", self.energy_label_var,
+                                  "--energy-label", width=26)
+
+    def _add_fel_options(self, row):
+        row = self._add_option_menu(row, "Angle units:", self.angle_units_var,
+                                    ["auto", "deg", "rad"], "--angle-units")
+        row = self._add_option_menu(row, "Unsampled bins:", self.unsampled_var,
+                                    ["mask", "max"], "--unsampled")
+        row = self._add_option_menu(row, "Colormap:", self.cmap_var,
+                                    ["viridis", "cividis", "inferno", "magma", "plasma"],
+                                    "--cmap")
+        row = self._add_entry(row, "Contour spacing:", self.contour_step_var,
+                              "--contour-step", width=10)
+        row = self._add_entry(row, "Max energy:", self.energy_max_var,
+                              "--energy-max   (blank = full range, or 'auto')", width=10)
+        row = self._add_entry(row, "Energy label:", self.energy_label_var,
+                              "--energy-label", width=26)
+        return row
+
+    def _add_option_menu(self, row, label, variable, choices, flag):
+        tk.Label(self.frame_options, text=label).grid(row=row, column=0, sticky="w", pady=2)
+        tk.OptionMenu(self.frame_options, variable, *choices).grid(
+            row=row, column=1, sticky="w", padx=4)
+        tk.Label(self.frame_options, text=flag, fg="gray",
+                 font=("Helvetica", 8, "italic")).grid(row=row, column=2, sticky="w")
+        return row + 1
+
+    def _add_entry(self, row, label, variable, flag, width=12):
+        tk.Label(self.frame_options, text=label).grid(row=row, column=0, sticky="w", pady=2)
+        tk.Entry(self.frame_options, textvariable=variable, width=width).grid(
+            row=row, column=1, sticky="w", padx=4)
+        tk.Label(self.frame_options, text=flag, fg="gray",
+                 font=("Helvetica", 8, "italic")).grid(row=row, column=2, sticky="w")
+        return row + 1
+
+    def _plot_options(self):
+        """Validated plot options, as keyword arguments for plot_fel_mercator()."""
+        return {
+            "angle_units": self.angle_units_var.get(),
+            "energy_label": self.energy_label_var.get(),
+            "contour_step": parse_contour_step(self.contour_step_var.get()),
+            "cmap": self.cmap_var.get(),
+            "energy_max": parse_energy_max(self.energy_max_var.get()),
+            "unsampled": self.unsampled_var.get(),
+        }
 
     def browse_file(self, var_to_update, file_type):
         """Handles native OS file explorer dialogs."""
@@ -189,16 +288,21 @@ class PuckeringApp:
 
         mode = self.mode_var.get()
         try:
+            # Validate the options here, on the UI thread, so a typo in a text
+            # field is reported before any file is read.
+            self._plot_options()
             if mode == "FEL":
                 job = ("FEL", {"path": self.fel_path.get().strip()})
             else:
                 indices = parse_indices(self.entry_idx.get())
+                params = {"indices": indices,
+                          "check_ring": not self.skip_ring_check_var.get()}
                 if mode == "PDB":
-                    job = ("PDB", {"indices": indices, "pdb_files": self._selected_pdb_files()})
+                    params["pdb_files"] = self._selected_pdb_files()
                 else:
-                    job = ("MD", {"indices": indices,
-                                  "topology": self.top_path.get().strip(),
-                                  "trajectory": self.traj_path.get().strip()})
+                    params["topology"] = self.top_path.get().strip()
+                    params["trajectory"] = self.traj_path.get().strip()
+                job = (mode, params)
         except AnalysisError as exc:
             messagebox.showerror("Invalid input", str(exc))
             return
@@ -232,7 +336,11 @@ class PuckeringApp:
                 write_params_dat(results, f"{prefix}_params.dat", atom_names, ring_size)
                 payload = {"mode": mode, "results": results, "prefix": prefix,
                            "label": label, "atom_names": atom_names,
-                           "ring_size": ring_size}
+                           "ring_size": ring_size, "overlay_surface": None}
+
+                overlay_path = self.overlay_fel_path.get().strip()
+                if overlay_path and ring_size == PYRANOSE_SIZE:
+                    payload["overlay_surface"] = load_fel(overlay_path)[0]
         except AnalysisError as exc:
             self.root.after(0, self._on_failure, str(exc))
             return
@@ -248,9 +356,10 @@ class PuckeringApp:
         try:
             self.status_var.set("Plotting...")
             label, prefix = payload["label"], payload["prefix"]
+            options = self._plot_options()
 
             if payload["mode"] == "FEL":
-                plot_fel_mercator(payload["data"], prefix, title=label)
+                plot_fel_mercator(payload["data"], prefix, title=label, **options)
                 summary = f"FEL plot generated in folder '{label}'."
             else:
                 results = payload["results"]
@@ -261,6 +370,10 @@ class PuckeringApp:
                     plot_mercator(results, prefix, title=label)
                     plot_stoddart(results, prefix, title=label)
                     ring_type = "pyranose"
+                    if payload["overlay_surface"] is not None:
+                        plot_fel_mercator(payload["overlay_surface"], prefix,
+                                          title=label, overlay=results,
+                                          suffix="_on_FEL", **options)
                 else:
                     if len(results) > 1:
                         plot_furanose_time_series(results, prefix, title=label)

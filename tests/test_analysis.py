@@ -13,6 +13,8 @@ from src.analysis import (
     COL_THETA,
     compute_puckering,
     load_fel,
+    parse_contour_step,
+    parse_energy_max,
     parse_indices,
     prepare_output_dir,
     write_params_dat,
@@ -237,6 +239,49 @@ def test_rejects_unparseable_file(tmp_path):
     path.write_text("this is not a table\n")
     with pytest.raises(AnalysisError, match="Could not parse"):
         load_fel(str(path))
+
+
+# --------------------------------------------------------------------------
+# plot option parsing (shared by the GUI and the CLI)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value, expected", [
+    (None, None), ("", None), ("   ", None),
+    ("auto", "auto"), ("AUTO", "auto"), (" auto ", "auto"),
+    ("10", 10.0), ("12.5", 12.5), (7, 7.0), (0, 0.0), ("-3", -3.0),
+])
+def test_energy_max_accepts_numbers_auto_and_blank(value, expected):
+    assert parse_energy_max(value) == expected
+
+
+@pytest.mark.parametrize("value", ["high", "10 kcal", "auto2", "--"])
+def test_energy_max_rejects_anything_else(value):
+    with pytest.raises(AnalysisError, match="number, 'auto', or left blank"):
+        parse_energy_max(value)
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, 1.0), ("", 1.0), ("5", 5.0), ("0.5", 0.5), (2, 2.0),
+])
+def test_contour_step_defaults_to_one(value, expected):
+    assert parse_contour_step(value) == expected
+
+
+def test_contour_step_honours_an_explicit_default():
+    assert parse_contour_step("", default=5.0) == 5.0
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "-0.5"])
+def test_contour_step_must_be_positive(value):
+    """A step of zero would ask numpy.arange for infinitely many contours."""
+    with pytest.raises(AnalysisError, match="greater than zero"):
+        parse_contour_step(value)
+
+
+@pytest.mark.parametrize("value", ["wide", "1,5", "five"])
+def test_contour_step_must_be_a_number(value):
+    with pytest.raises(AnalysisError, match="must be a number"):
+        parse_contour_step(value)
 
 
 # --------------------------------------------------------------------------

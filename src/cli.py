@@ -19,6 +19,8 @@ from .analysis import (  # noqa: E402  (must follow the backend selection)
     describe_conformation,
     load_fel,
     load_ring_coordinates,
+    parse_contour_step,
+    parse_energy_max,
     parse_indices,
     prepare_output_dir,
     write_params_dat,
@@ -89,18 +91,6 @@ def _run_structural(args, mode):
     return 0
 
 
-def _parse_energy_max(value):
-    """Accepts a number or the literal 'auto'; anything else is a user error."""
-    if value is None or value == "auto":
-        return value
-    try:
-        return float(value)
-    except ValueError:
-        raise AnalysisError(
-            f"--energy-max must be a number or 'auto', got {value!r}."
-        ) from None
-
-
 def _run_fel(args):
     data, field_names = load_fel(args.file)
     if field_names:
@@ -116,9 +106,9 @@ def _run_fel(args):
         title=label,
         angle_units=args.angle_units,
         energy_label=args.energy_label,
-        contour_step=args.contour_step,
+        contour_step=parse_contour_step(args.contour_step),
         cmap=args.cmap,
-        energy_max=_parse_energy_max(args.energy_max),
+        energy_max=parse_energy_max(args.energy_max),
         unsampled=args.unsampled,
     )
     print(f"Wrote {path}")

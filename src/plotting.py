@@ -10,6 +10,7 @@ headless process (tests, CLI). The Tkinter GUI selects "TkAgg" before importing.
 from collections import Counter
 
 import numpy as np
+import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 
@@ -715,10 +716,14 @@ def plot_fel_mercator(data, path_prefix, title=None, show=False,
     # Overlay ideal conformational reference points
     ax.scatter(IDEAL_PHI, IDEAL_THETA, marker=".", color="white",
                edgecolor="black", s=50, zorder=3)
+    # A white halo instead of a filled box: the labels have to stay legible over
+    # both the dark basins and the pale unsampled ground, and a box on each of
+    # the 41 points clutters the map.
+    halo = [path_effects.withStroke(linewidth=2.5, foreground="white")]
     for i, label in enumerate(LABELS_TEX):
         ax.annotate(label, (IDEAL_PHI[i], IDEAL_THETA[i]), fontsize=13,
                     color="black", weight="bold", zorder=4,
-                    bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1))
+                    path_effects=halo)
 
     ax.axis((0, 360, 180, 0))
     ax.set_xticks(np.arange(0, 361, 30))

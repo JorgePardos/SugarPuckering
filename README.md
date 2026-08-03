@@ -78,6 +78,9 @@ python -m src.cli fel --file fes.dat
 
 Run `python -m src.cli <mode> --help` for the full option list. FEL rendering accepts
 `--angle-units`, `--energy-label`, `--contour-step`, `--cmap`, `--energy-max` and `--unsampled`.
+The same options are available in the GUI's *Plot options* panel, each labelled with its flag.
+
+**See [MANUAL.md](MANUAL.md)** for what every option does, how to read the output, and recipes.
 
 ### Reading a free energy surface
 
