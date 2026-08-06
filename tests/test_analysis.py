@@ -375,6 +375,36 @@ def test_xplor_delta_is_already_picoseconds(tmp_path):
     assert info["flavour"] == "X-PLOR/NAMD"
 
 
+def test_picoseconds_are_recognised_despite_the_charmm_flag(tmp_path):
+    """
+    Writers disagree about DELTA's units: files carrying the same CHARMM flag have
+    been seen storing AKMA and storing picoseconds. Trusting the flag reads one of
+    them 20x wrong, so the value is judged on whether it is a possible integration
+    step: 0.001 as AKMA would be 0.049 fs, which no integrator uses.
+    """
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.001, nsavc=1)
+    timestep, info = read_dcd_timestep(path)
+    assert timestep == pytest.approx(0.001)      # 1 fs, not 4.9e-5 ps
+    assert info["delta_units"] == "ps"
+    assert info["step_is_plausible"]
+
+
+def test_akma_is_still_recognised_when_it_is_the_plausible_one(tmp_path):
+    """The same 1 fs step, written the other way round, must resolve the same."""
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=1)
+    timestep, info = read_dcd_timestep(path)
+    assert timestep == pytest.approx(0.001, rel=1e-4)
+    assert info["delta_units"] == "AKMA"
+
+
+def test_an_implausible_step_is_flagged_but_still_returned(tmp_path):
+    """Neither reading makes sense here; say so rather than silently pick one."""
+    path = write_dcd_header(tmp_path / "t.dcd", delta=7.5, nsavc=1, charmm_version=0)
+    timestep, info = read_dcd_timestep(path)
+    assert timestep == pytest.approx(7.5)
+    assert info["step_is_plausible"] is False
+
+
 def test_save_frequency_multiplies_the_step(tmp_path):
     """A run saved every NSAVC steps has NSAVC times the spacing between frames."""
     path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=250)

@@ -516,6 +516,9 @@ def parse_contour_step(value, default=1.0):
 DCD_HEADER_BLOCK = 84
 # CHARMM stores its integration step in AKMA time units.
 AKMA_TO_PS = 4.88882129e-2
+# An MD integration step is physically about 0.1 to 10 fs. Used to tell an AKMA
+# DELTA from one already in picoseconds, which the header flag does not settle.
+PLAUSIBLE_STEP_PS = (1e-4, 1e-2)
 
 
 def read_dcd_timestep(path):
@@ -555,16 +558,33 @@ def read_dcd_timestep(path):
 
     delta_offset = 8 + 9 * 4
     if charmm_version:
-        delta_ps = struct.unpack(endian + "f", head[delta_offset:delta_offset + 4])[0]
-        delta_ps *= AKMA_TO_PS
+        raw = struct.unpack(endian + "f", head[delta_offset:delta_offset + 4])[0]
     else:
-        delta_ps = struct.unpack(endian + "d", head[delta_offset:delta_offset + 8])[0]
+        raw = struct.unpack(endian + "d", head[delta_offset:delta_offset + 8])[0]
+    if not np.isfinite(raw) or raw <= 0.0:
+        return None
+
+    # The CHARMM version flag is supposed to say whether DELTA is in AKMA units
+    # or already in picoseconds, but writers disagree: files carrying the same
+    # flag have been seen storing each. Deciding by units alone therefore gets one
+    # of them wrong by a factor of 20. Since an integration step is physically
+    # confined to roughly 0.1-10 fs, try both readings and keep whichever lands
+    # in that range.
+    order = [(raw * AKMA_TO_PS, "AKMA"), (raw, "ps")]
+    if not charmm_version:
+        order.reverse()
+    plausible = [(value, units) for value, units in order
+                 if PLAUSIBLE_STEP_PS[0] <= value <= PLAUSIBLE_STEP_PS[1]]
+
+    delta_ps, delta_units = plausible[0] if plausible else order[0]
 
     timestep = delta_ps * nsavc
     if not np.isfinite(timestep) or timestep <= 0.0:
         return None
     return timestep, {"delta_ps": delta_ps, "nsavc": nsavc,
-                      "flavour": "CHARMM" if charmm_version else "X-PLOR/NAMD"}
+                      "flavour": "CHARMM" if charmm_version else "X-PLOR/NAMD",
+                      "delta_units": delta_units,
+                      "step_is_plausible": bool(plausible)}
 
 
 def resolve_timestep(trajectory, timestep_ps=None):

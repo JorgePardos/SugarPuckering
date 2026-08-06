@@ -231,8 +231,10 @@ Whether you need it depends on the format:
 
 DCD does not round-trip per-frame times — mdtraj returns 0, 1, 2, …, i.e. frame indices wearing time
 units — but its header carries `DELTA` (the integration step) and `NSAVC` (the save frequency). The
-program reads them and uses `DELTA × NSAVC` as the spacing, converting from AKMA units for a
-CHARMM-flavoured file. It always prints what it found:
+program reads them and uses `DELTA × NSAVC` as the spacing. `DELTA` may be stored in AKMA units or
+already in picoseconds, and the header flag that is supposed to say which is not reliable — files
+carrying the same flag have been seen storing each — so both readings are tried and the one that is a
+possible integration step (roughly 0.1 to 10 fs) wins. It always prints what it found:
 
 ```
 Timestep: 0.001 ps/frame, DCD header (CHARMM: DELTA=0.001 ps, NSAVC=1) -> 0.381 ps over 382 frames
