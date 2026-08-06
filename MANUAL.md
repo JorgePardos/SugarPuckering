@@ -221,11 +221,23 @@ By default the per-frame plots are drawn against the frame number. Give `--times
 between frames) and they switch to simulation time, automatically labelled in ps or, past a thousand,
 in ns.
 
-The spacing has to be stated because it usually cannot be read from the file. Trajectory writers
-routinely leave the time field unset, and the reader then hands back 0, 1, 2, … — frame indices
-wearing time units. The program treats exactly that pattern as "no time information" and stays on
-frame numbers rather than labelling indices as picoseconds. A trajectory that does carry real times is
-used automatically; `--timestep` overrides it either way.
+Whether you need it depends on the format:
+
+| Format | Per-frame time | Need `--timestep`? |
+|---|---|---|
+| `.nc` (AMBER NetCDF) | stored, in ps | no |
+| `.xtc`, `.trr` | stored | no |
+| `.dcd` | **not preserved** | **yes** |
+
+DCD does have `DELTA` and `NSAVC` timing fields in its header, but mdtraj does not use them to build
+the per-frame times — it returns 0, 1, 2, … instead, i.e. frame indices wearing time units. Those
+header fields are frequently wrong anyway: QM/MM writers tend to store the integration step and leave
+`NSAVC` at 1 no matter how often frames were really written, so a run saved every 262 steps still
+claims 1 fs per frame.
+
+The program treats a 0, 1, 2, … sequence as "no time information" and stays on frame numbers rather
+than labelling indices as picoseconds. A trajectory that carries real times is used automatically;
+`--timestep` overrides either way.
 
 ```bash
 # 382 frames over 100 ps

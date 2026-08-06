@@ -242,9 +242,12 @@ def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajecto
     if check_ring:
         check_ring_connectivity(structure_topology, indices, atom_names)
 
-    # Many trajectory writers leave the time field unset and mdtraj then hands
-    # back 0, 1, 2, ... -- frame indices wearing time units. Only pass along
-    # times that say something a frame number does not.
+    # NetCDF, XTC and TRR carry a real per-frame time and round-trip it faithfully.
+    # DCD does not: mdtraj ignores the header's DELTA/NSAVC fields and hands back
+    # 0, 1, 2, ... -- frame indices wearing time units. (Those fields are also
+    # routinely wrong; QM/MM writers tend to store the integration step and leave
+    # NSAVC at 1 regardless of how often frames were actually saved.) So only pass
+    # along times that say something a frame number does not.
     times_ps = None
     if getattr(traj, "time", None) is not None and not looks_like_frame_indices(traj.time):
         times_ps = np.asarray(traj.time, dtype=float)
@@ -330,7 +333,8 @@ def make_progress_axis(n_frames, times_ps=None, timestep_ps=None):
                "Frame" when there is no trustworthy time information -- a
                trajectory whose stored times are just 0, 1, 2, ... is reporting
                frame indices, not picoseconds, and labelling those "ps" would be
-               a quiet lie.
+               a quiet lie. NetCDF, XTC and TRR round-trip real times and are
+               used automatically; DCD does not (see load_ring_coordinates).
     """
     frames = np.arange(n_frames, dtype=float)
 

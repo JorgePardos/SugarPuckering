@@ -148,11 +148,11 @@ def build_parser():
                        help="angle units of the --fel file")
         p.add_argument("--energy-label", default="Free Energy (kcal/mol)",
                        help="colourbar label for the --fel file")
-        # Trajectory files routinely store 0, 1, 2, ... as their times, so the
-        # spacing has to be stated rather than guessed.
+        # DCD loses the per-frame time, so for those the spacing has to be
+        # stated. NetCDF, XTC and TRR keep it and need no flag.
         p.add_argument("--timestep", type=float, default=None,
-                       help="picoseconds between frames; switches the time axes "
-                            "from frame number to simulation time")
+                       help="picoseconds between frames; needed for DCD, which "
+                            "does not store per-frame times (NetCDF/XTC/TRR do)")
 
     p_pdb = sub.add_parser("pdb", help="analyse one or more static PDB structures")
     p_pdb.add_argument("--files", nargs="+", required=True, help="PDB file(s)")
