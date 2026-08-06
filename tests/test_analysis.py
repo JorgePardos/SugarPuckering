@@ -1,6 +1,7 @@
 """Tests for the GUI-free analysis pipeline."""
 
 import os
+import struct
 
 import numpy as np
 import pytest
@@ -21,6 +22,8 @@ from src.analysis import (
     parse_energy_max,
     parse_indices,
     prepare_output_dir,
+    read_dcd_timestep,
+    resolve_timestep,
     write_params_dat,
 )
 
@@ -338,8 +341,89 @@ def test_frame_index_times_are_recognised(times, expected):
 
 
 # --------------------------------------------------------------------------
-# conformer labels in LaTeX
+# DCD header timing
 # --------------------------------------------------------------------------
+
+def write_dcd_header(path, delta, nsavc, charmm_version=35, endian="<"):
+    """Writes just enough of a DCD header for read_dcd_timestep() to parse."""
+    control = [0] * 20
+    control[2] = nsavc
+    control[19] = charmm_version
+
+    head = struct.pack(endian + "i", 84) + b"CORD"
+    body = bytearray(struct.pack(endian + "20i", *control))
+    if charmm_version:
+        body[9 * 4:10 * 4] = struct.pack(endian + "f", delta)
+    else:
+        body[9 * 4:11 * 4] = struct.pack(endian + "d", delta)
+    path.write_bytes(head + bytes(body) + b"\x00" * 8)
+    return str(path)
+
+
+def test_charmm_delta_is_converted_from_akma(tmp_path):
+    """CHARMM stores the step in AKMA units; 1 fs is 0.020455 AKMA."""
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=1)
+    timestep, info = read_dcd_timestep(path)
+    assert timestep == pytest.approx(0.001, rel=1e-4)
+    assert info["flavour"] == "CHARMM"
+
+
+def test_xplor_delta_is_already_picoseconds(tmp_path):
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.5, nsavc=1, charmm_version=0)
+    timestep, info = read_dcd_timestep(path)
+    assert timestep == pytest.approx(0.5)
+    assert info["flavour"] == "X-PLOR/NAMD"
+
+
+def test_save_frequency_multiplies_the_step(tmp_path):
+    """A run saved every NSAVC steps has NSAVC times the spacing between frames."""
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=250)
+    timestep, info = read_dcd_timestep(path)
+    assert timestep == pytest.approx(0.25, rel=1e-4)
+    assert info["nsavc"] == 250
+
+
+def test_big_endian_headers_are_read(tmp_path):
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.25, nsavc=2,
+                            charmm_version=0, endian=">")
+    assert read_dcd_timestep(path)[0] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("delta", [0.0, -1.0])
+def test_a_meaningless_step_is_refused(tmp_path, delta):
+    path = write_dcd_header(tmp_path / "t.dcd", delta=delta, nsavc=1, charmm_version=0)
+    assert read_dcd_timestep(path) is None
+
+
+def test_a_non_dcd_file_is_refused(tmp_path):
+    path = tmp_path / "not.dcd"
+    path.write_bytes(b"this is not a DCD header at all, not even close" * 3)
+    assert read_dcd_timestep(str(path)) is None
+
+
+def test_a_missing_file_is_refused(tmp_path):
+    assert read_dcd_timestep(str(tmp_path / "nope.dcd")) is None
+
+
+def test_an_explicit_timestep_beats_the_header(tmp_path):
+    """The header is frequently wrong, so the user must be able to override it."""
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=1)
+    timestep, source = resolve_timestep(path, timestep_ps=0.5)
+    assert timestep == 0.5
+    assert "user" in source
+
+
+def test_the_header_is_used_when_nothing_is_given(tmp_path):
+    path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=100)
+    timestep, source = resolve_timestep(path)
+    assert timestep == pytest.approx(0.1, rel=1e-4)
+    assert "DCD header" in source and "NSAVC=100" in source
+
+
+@pytest.mark.parametrize("name", ["run.nc", "run.xtc", "run.trr", None])
+def test_only_dcd_is_probed_for_a_header(name):
+    """The other formats carry real per-frame times, so there is nothing to guess."""
+    assert resolve_timestep(name) == (None, None)
 
 @pytest.mark.parametrize("plain, tex", [
     ("4C1", r"$^4C_1$"), ("1C4", r"$^1C_4$"),

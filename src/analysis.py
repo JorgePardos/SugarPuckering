@@ -8,6 +8,7 @@ unless a structural mode is actually used (mdtraj is imported lazily).
 """
 
 import os
+import struct
 
 import numpy as np
 
@@ -509,6 +510,83 @@ def parse_contour_step(value, default=1.0):
     if step <= 0:
         raise AnalysisError(f"Contour spacing must be greater than zero; got {step}.")
     return step
+
+
+# A DCD header block is 84 bytes and starts with the magic "CORD".
+DCD_HEADER_BLOCK = 84
+# CHARMM stores its integration step in AKMA time units.
+AKMA_TO_PS = 4.88882129e-2
+
+
+def read_dcd_timestep(path):
+    """
+    Recovers the frame spacing from a DCD header.
+
+    mdtraj does not use the DCD timing fields, but they are there: the spacing is
+    DELTA * NSAVC, with DELTA in AKMA units for a CHARMM-flavoured file and
+    already in picoseconds for the X-PLOR/NAMD flavour.
+
+    Treat the result with suspicion. Many writers store the integration step and
+    leave NSAVC at 1 whatever the real output frequency was, which makes the
+    header describe a much shorter run than the one on disk -- so callers should
+    report what they read rather than apply it silently.
+
+    Returns:
+        tuple: (timestep_ps, details) or None if the file is not a readable DCD
+               or the header carries no usable spacing.
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(92)
+    except OSError:
+        return None
+    if len(head) < 92 or head[4:8] != b"CORD":
+        return None
+
+    for endian in ("<", ">"):
+        if struct.unpack(endian + "i", head[0:4])[0] == DCD_HEADER_BLOCK:
+            break
+    else:
+        return None
+
+    control = struct.unpack(endian + "20i", head[8:88])
+    nsavc = control[2] or 1
+    charmm_version = control[19]
+
+    delta_offset = 8 + 9 * 4
+    if charmm_version:
+        delta_ps = struct.unpack(endian + "f", head[delta_offset:delta_offset + 4])[0]
+        delta_ps *= AKMA_TO_PS
+    else:
+        delta_ps = struct.unpack(endian + "d", head[delta_offset:delta_offset + 8])[0]
+
+    timestep = delta_ps * nsavc
+    if not np.isfinite(timestep) or timestep <= 0.0:
+        return None
+    return timestep, {"delta_ps": delta_ps, "nsavc": nsavc,
+                      "flavour": "CHARMM" if charmm_version else "X-PLOR/NAMD"}
+
+
+def resolve_timestep(trajectory, timestep_ps=None):
+    """
+    Decides the frame spacing and says where it came from.
+
+    An explicit value always wins. Otherwise a DCD is asked for its header
+    timing, since that format does not round-trip per-frame times.
+
+    Returns:
+        tuple: (timestep_ps or None, source description or None).
+    """
+    if timestep_ps:
+        return timestep_ps, "given by the user"
+
+    if trajectory and str(trajectory).lower().endswith(".dcd"):
+        found = read_dcd_timestep(trajectory)
+        if found:
+            timestep, info = found
+            return timestep, (f"DCD header ({info['flavour']}: "
+                              f"DELTA={info['delta_ps']:.6g} ps, NSAVC={info['nsavc']})")
+    return None, None
 
 
 def parse_timestep(value):

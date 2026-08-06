@@ -227,17 +227,26 @@ Whether you need it depends on the format:
 |---|---|---|
 | `.nc` (AMBER NetCDF) | stored, in ps | no |
 | `.xtc`, `.trr` | stored | no |
-| `.dcd` | **not preserved** | **yes** |
+| `.dcd` | not preserved; header timing read instead | check the printed value |
 
-DCD does have `DELTA` and `NSAVC` timing fields in its header, but mdtraj does not use them to build
-the per-frame times — it returns 0, 1, 2, … instead, i.e. frame indices wearing time units. Those
-header fields are frequently wrong anyway: QM/MM writers tend to store the integration step and leave
-`NSAVC` at 1 no matter how often frames were really written, so a run saved every 262 steps still
-claims 1 fs per frame.
+DCD does not round-trip per-frame times — mdtraj returns 0, 1, 2, …, i.e. frame indices wearing time
+units — but its header carries `DELTA` (the integration step) and `NSAVC` (the save frequency). The
+program reads them and uses `DELTA × NSAVC` as the spacing, converting from AKMA units for a
+CHARMM-flavoured file. It always prints what it found:
 
-The program treats a 0, 1, 2, … sequence as "no time information" and stays on frame numbers rather
-than labelling indices as picoseconds. A trajectory that carries real times is used automatically;
-`--timestep` overrides either way.
+```
+Timestep: 0.001 ps/frame, DCD header (CHARMM: DELTA=0.001 ps, NSAVC=1) -> 0.381 ps over 382 frames
+```
+
+**Read that line.** Those header fields are often wrong: many writers, QM/MM codes especially, store
+the integration step and leave `NSAVC` at 1 regardless of how often frames were actually written, so
+a run saved every 250 steps still claims 1 fs per frame and the header describes a run hundreds of
+times shorter than the one on disk. If the total does not match your simulation, pass `--timestep`
+— an explicit value always wins.
+
+Formats other than DCD are left alone: their stored times are used directly, and a 0, 1, 2, …
+sequence is treated as "no time information" so the plots stay on frame numbers rather than
+labelling indices as picoseconds.
 
 ```bash
 # 382 frames over 100 ps
