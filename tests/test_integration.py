@@ -185,6 +185,71 @@ def test_missing_file_is_reported_clearly(tmp_path, capsys):
 
 
 # --------------------------------------------------------------------------
+# the time axis
+# --------------------------------------------------------------------------
+
+def _write_nc_with_times(tmp_path, pdb_path, times_ps):
+    """Saves the reference structure as a NetCDF trajectory carrying real times."""
+    frame = mdtraj.load(pdb_path)
+    traj = mdtraj.Trajectory(
+        xyz=np.repeat(frame.xyz, len(times_ps), axis=0), topology=frame.topology)
+    traj.time = np.asarray(times_ps, dtype=float)
+    path = str(tmp_path / "real_times.nc")
+    traj.save(path)
+    return path
+
+
+def test_netcdf_times_drive_the_axis_without_a_timestep(reference_pdb, tmp_path, capsys):
+    """
+    NetCDF stores a real per-frame time, so no flag should be needed. Guards the
+    automatic path: if it broke, plots would silently fall back to frame numbers.
+    """
+    times = np.arange(6) * 0.25
+    nc_path = _write_nc_with_times(tmp_path, reference_pdb, times)
+
+    assert main(["md", "--top", reference_pdb, "--traj", nc_path,
+                 "--indices", RING_INDICES_1BASED,
+                 "--job", "nc", "--outdir", str(tmp_path)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Progress axis: Time (ps)" in out
+    assert "DCD header" not in out
+
+
+def test_dcd_warns_and_stays_on_frames(reference_pdb, tmp_path, capsys):
+    """
+    DCD loses the per-frame time and its header's NSAVC is unreliable, so the run
+    must say so and keep the honest frame axis rather than invent a time one.
+    """
+    frame = mdtraj.load(reference_pdb)
+    traj = mdtraj.Trajectory(xyz=np.repeat(frame.xyz, 5, axis=0), topology=frame.topology)
+    dcd_path = str(tmp_path / "run.dcd")
+    traj.save(dcd_path)
+
+    assert main(["md", "--top", reference_pdb, "--traj", dcd_path,
+                 "--indices", RING_INDICES_1BASED,
+                 "--job", "dcd", "--outdir", str(tmp_path)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Progress axis: Frame" in out
+
+
+def test_an_explicit_timestep_puts_a_dcd_on_a_time_axis(reference_pdb, tmp_path, capsys):
+    frame = mdtraj.load(reference_pdb)
+    traj = mdtraj.Trajectory(xyz=np.repeat(frame.xyz, 5, axis=0), topology=frame.topology)
+    dcd_path = str(tmp_path / "run.dcd")
+    traj.save(dcd_path)
+
+    main(["md", "--top", reference_pdb, "--traj", dcd_path,
+          "--indices", RING_INDICES_1BASED, "--timestep", "0.1",
+          "--job", "dcdts", "--outdir", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert "Progress axis: Time (ps)" in out
+    assert "given by the user" in out
+
+
+# --------------------------------------------------------------------------
 # ring connectivity check
 # --------------------------------------------------------------------------
 
