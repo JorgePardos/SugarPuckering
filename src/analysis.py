@@ -587,15 +587,21 @@ def read_dcd_timestep(path):
                       "step_is_plausible": bool(plausible)}
 
 
-def resolve_timestep(trajectory, timestep_ps=None):
+def resolve_timestep(trajectory, timestep_ps=None, n_frames=None):
     """
-    Decides the frame spacing and says where it came from.
+    Decides the frame spacing, and describes what the file claims.
 
-    An explicit value always wins. Otherwise a DCD is asked for its header
-    timing, since that format does not round-trip per-frame times.
+    Only an explicit value is ever used. The DCD header is read and reported but
+    deliberately not applied: DELTA (the integration step) is usually right, but
+    NSAVC (the save frequency) is routinely left at 1 no matter how often frames
+    were really written. Both reference trajectories here do exactly that -- one
+    was saved every 100 steps and still claims 1 -- which makes the header
+    underestimate the run by that same factor. A wrong time axis is worse than an
+    honest frame-number axis, so the header only ever becomes a printed hint.
 
     Returns:
-        tuple: (timestep_ps or None, source description or None).
+        tuple: (timestep_ps or None, note). The note describes the source when a
+               timestep was given, or what the header claims when one was not.
     """
     if timestep_ps:
         return timestep_ps, "given by the user"
@@ -603,9 +609,15 @@ def resolve_timestep(trajectory, timestep_ps=None):
     if trajectory and str(trajectory).lower().endswith(".dcd"):
         found = read_dcd_timestep(trajectory)
         if found:
-            timestep, info = found
-            return timestep, (f"DCD header ({info['flavour']}: "
-                              f"DELTA={info['delta_ps']:.6g} ps, NSAVC={info['nsavc']})")
+            header_step, info = found
+            total = f", {header_step * n_frames:g} ps total" if n_frames else ""
+            return None, (
+                f"the DCD header claims {header_step:g} ps/frame "
+                f"(DELTA={info['delta_ps']:.6g} ps read as {info['delta_units']}, "
+                f"NSAVC={info['nsavc']}){total} -- NSAVC is often left at 1 "
+                f"regardless of the real output frequency, so this is only a hint; "
+                f"pass --timestep to set the axis"
+            )
     return None, None
 
 

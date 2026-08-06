@@ -230,21 +230,31 @@ Whether you need it depends on the format:
 | `.dcd` | not preserved; header timing read instead | check the printed value |
 
 DCD does not round-trip per-frame times — mdtraj returns 0, 1, 2, …, i.e. frame indices wearing time
-units — but its header carries `DELTA` (the integration step) and `NSAVC` (the save frequency). The
-program reads them and uses `DELTA × NSAVC` as the spacing. `DELTA` may be stored in AKMA units or
-already in picoseconds, and the header flag that is supposed to say which is not reliable — files
-carrying the same flag have been seen storing each — so both readings are tried and the one that is a
-possible integration step (roughly 0.1 to 10 fs) wins. It always prints what it found:
+units. Its header does carry `DELTA` (the integration step) and `NSAVC` (the save frequency), and the
+program reads and reports them:
 
 ```
-Timestep: 0.001 ps/frame, DCD header (CHARMM: DELTA=0.001 ps, NSAVC=1) -> 0.381 ps over 382 frames
+Note: the DCD header claims 0.001 ps/frame (DELTA=0.001 ps read as ps, NSAVC=1),
+      2.589 ps total -- NSAVC is often left at 1 regardless of the real output
+      frequency, so this is only a hint; pass --timestep to set the axis
 ```
 
-**Read that line.** Those header fields are often wrong: many writers, QM/MM codes especially, store
-the integration step and leave `NSAVC` at 1 regardless of how often frames were actually written, so
-a run saved every 250 steps still claims 1 fs per frame and the header describes a run hundreds of
-times shorter than the one on disk. If the total does not match your simulation, pass `--timestep`
-— an explicit value always wins.
+**That figure is a hint, not the answer, and the axis stays on frame numbers until you give
+`--timestep`.** `DELTA` is usually right; `NSAVC` usually is not. Both reference trajectories here
+leave it at 1 — one of them was saved every 100 steps, so its header describes a 2.6 ps run when the
+real one is 258.9 ps. Deriving the axis from that would be wrong by two orders of magnitude, silently.
+
+`DELTA` itself is stored either in AKMA units or already in picoseconds, and the header flag that is
+supposed to say which is not reliable — files carrying the same flag have been seen storing each — so
+both readings are tried and the one that is a possible integration step (roughly 0.1 to 10 fs) wins.
+
+To get the spacing right, take it from the run itself: the number of steps and the total time are
+printed by the MD engine, and `total_ps / n_frames` is what you want.
+
+```bash
+# 258.940 ps over 2589 frames
+python -m src.cli md --top system.prmtop --traj traj.dcd --indices "..." --timestep 0.1
+```
 
 Formats other than DCD are left alone: their stored times are used directly, and a 0, 1, 2, …
 sequence is treated as "no time information" so the plots stay on frame numbers rather than

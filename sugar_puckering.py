@@ -340,8 +340,9 @@ class PuckeringApp:
                 self.root.after(0, self.status_var.set,
                                 f"Computing {ring_xyz.shape[0]} frame(s)...")
                 results = compute_puckering(ring_xyz)
-                timestep, _source = resolve_timestep(
-                    params.get("trajectory"), parse_timestep(self.timestep_var.get()))
+                timestep, _note = resolve_timestep(
+                    params.get("trajectory"), parse_timestep(self.timestep_var.get()),
+                    len(results))
                 progress, progress_label = make_progress_axis(
                     len(results), times_ps, timestep)
                 _dir, prefix, label = prepare_output_dir(job_name, base_name)

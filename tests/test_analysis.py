@@ -443,11 +443,19 @@ def test_an_explicit_timestep_beats_the_header(tmp_path):
     assert "user" in source
 
 
-def test_the_header_is_used_when_nothing_is_given(tmp_path):
+def test_the_header_is_reported_but_never_applied(tmp_path):
+    """
+    NSAVC is routinely left at 1 whatever the real output frequency was -- both
+    reference trajectories do it, one saved every 100 steps -- so the header
+    underestimates the run by that factor. It is offered as a hint; the axis stays
+    on frame numbers until a timestep is given.
+    """
     path = write_dcd_header(tmp_path / "t.dcd", delta=0.020454827696, nsavc=100)
-    timestep, source = resolve_timestep(path)
-    assert timestep == pytest.approx(0.1, rel=1e-4)
-    assert "DCD header" in source and "NSAVC=100" in source
+    timestep, note = resolve_timestep(path, n_frames=50)
+    assert timestep is None
+    assert "0.1 ps/frame" in note and "NSAVC=100" in note
+    assert "5 ps total" in note
+    assert "--timestep" in note
 
 
 @pytest.mark.parametrize("name", ["run.nc", "run.xtc", "run.trr", None])

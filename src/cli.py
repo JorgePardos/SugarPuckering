@@ -56,12 +56,15 @@ def _run_structural(args, mode):
     print(f"Ring atoms resolved to: {', '.join(atom_names)}")
 
     results = compute_puckering(ring_xyz)
-    timestep, timestep_source = resolve_timestep(getattr(args, "traj", None), args.timestep)
+    timestep, timestep_note = resolve_timestep(getattr(args, "traj", None),
+                                               args.timestep, len(results))
     progress, progress_label = make_progress_axis(len(results), times_ps, timestep)
-    if timestep_source:
+    if timestep and timestep_note:
         span = timestep * (len(results) - 1)
-        print(f"Timestep: {timestep:g} ps/frame, {timestep_source} "
+        print(f"Timestep: {timestep:g} ps/frame, {timestep_note} "
               f"-> {span:g} ps over {len(results)} frames")
+    elif timestep_note:
+        print(f"Note: {timestep_note}")
     print(f"Progress axis: {progress_label}")
     axis = {"progress": progress, "progress_label": progress_label}
     job_dir, prefix, label = prepare_output_dir(args.job, base_name, args.outdir)
