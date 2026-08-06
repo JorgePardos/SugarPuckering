@@ -32,6 +32,11 @@ PRIMARY_COLOR = "#31688E"
 NO_DATA_COLOR = "#EDEDED"
 
 
+def _title(title, default):
+    """Figure titles are set in upper case throughout."""
+    return (title or default).upper()
+
+
 def _finish(fig, out_path, show):
     """Saves the figure, optionally shows it, and always releases it."""
     fig.savefig(out_path, dpi=300)
@@ -70,7 +75,20 @@ def _split_at_phi_wrap(phi, theta, threshold=180.0):
             if len(s) > 1]
 
 
-def plot_mercator(results_data, path_prefix, title=None, show=False, connect=True):
+def _progress_axis(results_data, progress, progress_label):
+    """
+    Resolves the per-frame x-axis / colour variable.
+
+    Defaults to 1-based frame numbers; pass `progress` (from
+    analysis.make_progress_axis) to plot against simulation time instead.
+    """
+    if progress is None:
+        return results_data[:, COL_FRAME] + 1.0, progress_label
+    return np.asarray(progress, dtype=float), progress_label
+
+
+def plot_mercator(results_data, path_prefix, title=None, show=False, connect=False,
+                  progress=None, progress_label="Frame"):
     """
     Plots a Mercator projection of the Cremer-Pople sphere showing the
     trajectory points over the ideal Stoddart conformational map.
@@ -82,8 +100,12 @@ def plot_mercator(results_data, path_prefix, title=None, show=False, connect=Tru
                      not the path prefix.
         show (bool): open an interactive window. Leave False inside a GUI, where
                      plt.show() would block the Tk event loop.
-        connect (bool): join consecutive frames, so the itinerary reads as a path
-                        instead of a cloud whose order is only implied by colour.
+        connect (bool): join consecutive frames with a line. Off by default: on a
+                        long trajectory the path turns into a tangle that hides
+                        the points, and the colour already carries the order.
+        progress (numpy.ndarray): value per frame for the colour scale, e.g.
+                        simulation time. Defaults to the frame number.
+        progress_label (str): what `progress` measures, used as the colourbar label.
 
     Returns:
         str: the path written.
@@ -92,7 +114,7 @@ def plot_mercator(results_data, path_prefix, title=None, show=False, connect=Tru
 
     _draw_reference_map(ax)
     ax.grid(True, linestyle="--", alpha=0.6)
-    ax.set_title(title or "Conformational Map", fontsize=14)
+    ax.set_title(_title(title, "Conformational Map"), fontsize=14)
 
     if len(results_data) == 1:
         ax.scatter(results_data[:, COL_PHI], results_data[:, COL_THETA],
@@ -103,12 +125,12 @@ def plot_mercator(results_data, path_prefix, title=None, show=False, connect=Tru
                                                          results_data[:, COL_THETA]):
                 ax.plot(seg_phi, seg_theta, color="#555555", linewidth=0.8,
                         alpha=0.55, zorder=4)
-        frames = results_data[:, COL_FRAME] + 1  # 1-based frame indexing
+        values, label = _progress_axis(results_data, progress, progress_label)
         scatter = ax.scatter(results_data[:, COL_PHI], results_data[:, COL_THETA],
-                             s=30, c=frames, cmap="plasma", zorder=5,
+                             s=30, c=values, cmap="plasma", zorder=5,
                              edgecolor="black", linewidths=0.5)
         cbar = fig.colorbar(scatter, ax=ax, shrink=0.85)
-        cbar.set_label("Frame", rotation=270, labelpad=20)
+        cbar.set_label(label, rotation=270, labelpad=20)
 
     fig.tight_layout()
     return _finish(fig, f"{path_prefix}_mercator.png", show)
@@ -175,7 +197,8 @@ def _draw_stoddart_hemisphere(ax, north, points, frames, indices=None, connect=T
     ax.set_title(f"{hemisphere} hemisphere", fontsize=12, pad=18)
 
 
-def plot_stoddart(results_data, path_prefix, title=None, show=False, connect=True):
+def plot_stoddart(results_data, path_prefix, title=None, show=False, connect=False,
+                  progress=None, progress_label="Frame"):
     """
     Plots the polar Stoddart diagram: both hemispheres of the Cremer-Pople sphere
     seen from their poles.
@@ -190,7 +213,7 @@ def plot_stoddart(results_data, path_prefix, title=None, show=False, connect=Tru
     """
     theta = results_data[:, COL_THETA]
     phi = results_data[:, COL_PHI]
-    frame_numbers = results_data[:, COL_FRAME] + 1
+    frame_numbers, progress_label = _progress_axis(results_data, progress, progress_label)
     single = len(results_data) == 1
 
     north_mask = theta <= 90.0
@@ -214,39 +237,42 @@ def plot_stoddart(results_data, path_prefix, title=None, show=False, connect=Tru
             cmap="plasma",
             norm=plt.Normalize(vmin=frame_numbers.min(), vmax=frame_numbers.max()))
         cbar = fig.colorbar(mappable, ax=axes, shrink=0.7, pad=0.08)
-        cbar.set_label("Frame", rotation=270, labelpad=20)
+        cbar.set_label(progress_label, rotation=270, labelpad=20)
 
-    fig.suptitle(title or "Stoddart diagram", fontsize=15)
+    fig.suptitle(_title(title, "Stoddart diagram"), fontsize=15)
     return _finish(fig, f"{path_prefix}_stoddart.png", show)
 
 
-def plot_time_series(results_data, path_prefix, title=None, show=False):
+def plot_time_series(results_data, path_prefix, title=None, show=False,
+                     progress=None, progress_label="Frame"):
     """
     Plots the temporal evolution of Theta and Phi parameters along a MD trajectory.
 
     Args and Returns: see plot_mercator(); "_timeseries.png" is appended.
     """
-    frames = results_data[:, COL_FRAME] + 1  # 1-based indexing
+    frames, progress_label = _progress_axis(results_data, progress, progress_label)
     theta = results_data[:, COL_THETA]
     phi = results_data[:, COL_PHI]
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
 
-    # Theta subplot (Chair vs Boat progression)
-    ax1.plot(frames, theta, color="royalblue", linewidth=1.5, alpha=0.8)
+    # Theta subplot (Chair vs Boat progression). Markers only: a connecting line
+    # over thousands of frames reads as a solid block and hides the density.
     ax1.scatter(frames, theta, color="royalblue", s=10)
-    ax1.axhline(y=0, color="red", linestyle="--", alpha=0.4, label="Chair 4C1 (~0°)")
-    ax1.axhline(y=90, color="green", linestyle="--", alpha=0.4, label="Boats/Skews (~90°)")
-    ax1.axhline(y=180, color="purple", linestyle="--", alpha=0.4, label="Chair 1C4 (~180°)")
+    ax1.axhline(y=0, color="red", linestyle="--", alpha=0.4,
+                label=r"Chair $^4C_1$ (~0°)")
+    ax1.axhline(y=90, color="green", linestyle="--", alpha=0.4,
+                label="Boats/Skews (~90°)")
+    ax1.axhline(y=180, color="purple", linestyle="--", alpha=0.4,
+                label=r"Chair $^1C_4$ (~180°)")
 
     ax1.set_ylabel("Theta (θ) [°]", fontsize=12, fontweight="bold")
-    ax1.set_title(title or "Conformational Evolution", fontsize=14)
+    ax1.set_title(_title(title, "Conformational Evolution"), fontsize=14)
     ax1.set_ylim(-10, 190)
     ax1.legend(loc="upper right", fontsize=9)
     ax1.grid(True, linestyle=":", alpha=0.6)
 
     # Phi subplot (Equatorial pseudorotation)
-    ax2.plot(frames, phi, color="darkorange", linewidth=1.5, alpha=0.8)
     ax2.scatter(frames, phi, color="darkorange", s=10)
     ax2.set_ylabel("Phi (φ) [°]", fontsize=12, fontweight="bold")
     ax2.set_ylim(-10, 370)
@@ -257,7 +283,7 @@ def plot_time_series(results_data, path_prefix, title=None, show=False):
     # puckered it is, and a ring flattening towards an oxocarbenium-like
     # transition state shows up here and nowhere else on these plots.
     _draw_amplitude_track(ax3, frames, results_data[:, COL_Q])
-    ax3.set_xlabel("Frame", fontsize=12, fontweight="bold")
+    ax3.set_xlabel(progress_label, fontsize=12, fontweight="bold")
 
     fig.tight_layout()
     return _finish(fig, f"{path_prefix}_timeseries.png", show)
@@ -265,7 +291,6 @@ def plot_time_series(results_data, path_prefix, title=None, show=False):
 
 def _draw_amplitude_track(ax, progress, Q):
     """Shared Q-versus-progress panel for the pyranose and furanose time series."""
-    ax.plot(progress, Q, color="#2E7D5B", linewidth=1.5, alpha=0.85)
     ax.scatter(progress, Q, color="#2E7D5B", s=10)
     mean_Q = float(np.mean(Q))
     ax.axhline(mean_Q, color="#B5411F", linestyle="--", alpha=0.6,
@@ -322,7 +347,7 @@ def plot_pseudorotation_wheel(results_data, path_prefix, title=None, show=False)
         cbar = fig.colorbar(scatter, ax=ax, shrink=0.7, pad=0.12)
         cbar.set_label("Frame", rotation=270, labelpad=20)
 
-    ax.set_title(title or "Pseudorotation Wheel", fontsize=14, pad=28)
+    ax.set_title(_title(title, "Pseudorotation Wheel"), fontsize=14, pad=28)
     ax.set_rlabel_position(0)
     ax.text(np.radians(4), outer * 1.02, r"$\nu_{max}$ [°]",
             fontsize=11, color=REFERENCE_COLOR)
@@ -332,44 +357,46 @@ def plot_pseudorotation_wheel(results_data, path_prefix, title=None, show=False)
     return _finish(fig, f"{path_prefix}_wheel.png", show)
 
 
-def plot_furanose_time_series(results_data, path_prefix, title=None, show=False):
+def plot_furanose_time_series(results_data, path_prefix, title=None, show=False,
+                              progress=None, progress_label="Frame"):
     """
     Plots the evolution of P and nu_max along a furanose trajectory.
 
     Args and Returns: see plot_mercator(); "_timeseries.png" is appended.
     """
-    frames = results_data[:, COL_FRAME] + 1
+    frames, progress_label = _progress_axis(results_data, progress, progress_label)
     phase = results_data[:, COL_P]
     nu_max = results_data[:, COL_NU_MAX]
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
 
-    ax1.plot(frames, phase, color="royalblue", linewidth=1.5, alpha=0.8)
     ax1.scatter(frames, phase, color="royalblue", s=10)
-    ax1.axhline(y=18, color="red", linestyle="--", alpha=0.4, label="North $^3E$ (P~18°)")
-    ax1.axhline(y=162, color="green", linestyle="--", alpha=0.4, label="South $^2E$ (P~162°)")
+    ax1.axhline(y=18, color="red", linestyle="--", alpha=0.4,
+                label=r"North $^3E$ (P~18°)")
+    ax1.axhline(y=162, color="green", linestyle="--", alpha=0.4,
+                label=r"South $^2E$ (P~162°)")
     ax1.set_ylabel("Phase P [°]", fontsize=12, fontweight="bold")
-    ax1.set_title(title or "Pseudorotation Evolution", fontsize=14)
+    ax1.set_title(_title(title, "Pseudorotation Evolution"), fontsize=14)
     ax1.set_ylim(-10, 370)
     ax1.set_yticks(np.arange(0, 361, 60))
     ax1.legend(loc="upper right", fontsize=9)
     ax1.grid(True, linestyle=":", alpha=0.6)
 
-    ax2.plot(frames, nu_max, color="darkorange", linewidth=1.5, alpha=0.8)
     ax2.scatter(frames, nu_max, color="darkorange", s=10)
     ax2.set_ylabel(r"$\nu_{max}$ [°]", fontsize=12, fontweight="bold")
     ax2.set_ylim(bottom=0)
     ax2.grid(True, linestyle=":", alpha=0.6)
 
     _draw_amplitude_track(ax3, frames, results_data[:, COL_Q])
-    ax3.set_xlabel("Frame", fontsize=12, fontweight="bold")
+    ax3.set_xlabel(progress_label, fontsize=12, fontweight="bold")
 
     fig.tight_layout()
     return _finish(fig, f"{path_prefix}_timeseries.png", show)
 
 
 def plot_conformer_timeline(results_data, path_prefix, ring_size,
-                            title=None, show=False, progress_label="Frame"):
+                            title=None, show=False, progress=None,
+                            progress_label="Frame"):
     """
     Which conformer the ring occupies at each step, as a timeline.
 
@@ -391,7 +418,7 @@ def plot_conformer_timeline(results_data, path_prefix, ring_size,
     Returns:
         str: the path written.
     """
-    from .analysis import conformer_order, describe_conformation
+    from .analysis import conformer_order, conformer_tex, describe_conformation
 
     labels = [describe_conformation(row, ring_size) for row in results_data]
     canonical = conformer_order(ring_size)
@@ -403,18 +430,17 @@ def plot_conformer_timeline(results_data, path_prefix, ring_size,
     axis += sorted(seen - set(axis))  # anything unexpected, e.g. "Undefined"
     row_of = {name: i for i, name in enumerate(axis)}
 
-    progress = results_data[:, COL_FRAME] + 1
+    values, progress_label = _progress_axis(results_data, progress, progress_label)
     track = np.array([row_of[name] for name in labels], dtype=float)
 
     fig, ax = plt.subplots(figsize=(11, max(3.0, 0.32 * len(axis) + 2.0)))
-    ax.step(progress, track, where="post", color=PRIMARY_COLOR, linewidth=1.4)
-    ax.scatter(progress, track, s=12, color=PRIMARY_COLOR, zorder=3)
+    ax.scatter(values, track, s=12, color=PRIMARY_COLOR, zorder=3)
 
     ax.set_yticks(np.arange(len(axis)))
-    ax.set_yticklabels(axis, fontsize=10)
+    ax.set_yticklabels([conformer_tex(name) for name in axis], fontsize=12)
     ax.set_ylim(-0.6, len(axis) - 0.4)
     ax.set_xlabel(progress_label, fontsize=12, fontweight="bold")
-    ax.set_title(title or "Conformational itinerary", fontsize=14)
+    ax.set_title(_title(title, "Conformational itinerary"), fontsize=14)
     ax.grid(True, axis="y", linestyle=":", alpha=0.5)
     ax.set_axisbelow(True)
     for side in ("top", "right"):
@@ -444,7 +470,8 @@ def plot_conformer_populations(results_data, path_prefix, ring_size,
     Returns:
         str: the path written.
     """
-    from .analysis import describe_conformation  # local: avoids a circular import
+    # Local import: analysis imports plotting indirectly via the front ends.
+    from .analysis import conformer_tex, describe_conformation
 
     labels = [describe_conformation(row, ring_size) for row in results_data]
     counts = Counter(labels)
@@ -461,15 +488,15 @@ def plot_conformer_populations(results_data, path_prefix, ring_size,
     positions = np.arange(len(names))[::-1]  # most populated at the top
     ax.barh(positions, percent, height=0.68, color=PRIMARY_COLOR)
 
-    for position, value, (_, count) in zip(positions, percent, ordered):
-        ax.text(value + max(percent) * 0.015, position, f"{value:.1f}%  (n={count})",
+    for position, value in zip(positions, percent):
+        ax.text(value + max(percent) * 0.015, position, f"{value:.1f}%",
                 va="center", fontsize=9, color=REFERENCE_COLOR)
 
     ax.set_yticks(positions)
-    ax.set_yticklabels(names, fontsize=11)
+    ax.set_yticklabels([conformer_tex(name) for name in names], fontsize=13)
     ax.set_xlabel("Population [% of frames]", fontsize=12, fontweight="bold")
     ax.set_xlim(0, max(percent) * 1.28)
-    ax.set_title(title or "Conformer populations", fontsize=14)
+    ax.set_title(_title(title, "Conformer populations"), fontsize=14)
     ax.grid(True, axis="x", linestyle=":", alpha=0.5)
     ax.set_axisbelow(True)
     for side in ("top", "right", "left"):
@@ -509,7 +536,7 @@ def plot_amplitude_histogram(results_data, path_prefix, title=None, show=False, 
 
     ax.set_xlabel("Puckering amplitude Q [Å]", fontsize=12, fontweight="bold")
     ax.set_ylabel("Frames", fontsize=12, fontweight="bold")
-    ax.set_title(title or "Puckering amplitude distribution", fontsize=14, pad=14)
+    ax.set_title(_title(title, "Puckering amplitude distribution"), fontsize=14, pad=14)
     ax.legend(loc="upper right", fontsize=10, frameon=False)
     ax.grid(True, axis="y", linestyle=":", alpha=0.5)
     ax.set_axisbelow(True)
@@ -730,7 +757,7 @@ def plot_fel_mercator(data, path_prefix, title=None, show=False,
     ax.set_yticks(np.arange(0, 181, 45))
     ax.set_xlabel("Phi (φ) [°]", fontsize=16, fontweight="bold")
     ax.set_ylabel("Theta (θ) [°]", fontsize=16, fontweight="bold")
-    ax.set_title(title or "Free Energy Landscape", fontsize=20, pad=20)
+    ax.set_title(_title(title, "Free Energy Landscape"), fontsize=20, pad=20)
 
     if overlay is not None and len(overlay):
         # White edges so the markers stay legible over both the dark basins and

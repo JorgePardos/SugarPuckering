@@ -14,6 +14,7 @@ import numpy as np
 from . import furanose
 from .math_core import (
     EQUATORIAL_LABELS,
+    LABEL_TO_TEX,
     NORTH_LABELS,
     RING_SIZE,
     SOUTH_LABELS,
@@ -164,8 +165,10 @@ def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajecto
         topology (str), trajectory (str): paths, for mode "MD".
 
     Returns:
-        tuple: (ring_xyz, atom_names, base_name) where ring_xyz has shape
-               (n_frames, 6, 3) in Angstrom.
+        tuple: (ring_xyz, atom_names, base_name, times_ps) where ring_xyz has
+               shape (n_frames, n_ring_atoms, 3) in Angstrom, and times_ps holds
+               the per-frame times or None when the trajectory does not really
+               carry them.
 
     Raises:
         AnalysisError: on missing files, missing mdtraj, or out-of-range indices.
@@ -239,7 +242,14 @@ def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajecto
     if check_ring:
         check_ring_connectivity(structure_topology, indices, atom_names)
 
-    return ring_xyz, atom_names, base_name
+    # Many trajectory writers leave the time field unset and mdtraj then hands
+    # back 0, 1, 2, ... -- frame indices wearing time units. Only pass along
+    # times that say something a frame number does not.
+    times_ps = None
+    if getattr(traj, "time", None) is not None and not looks_like_frame_indices(traj.time):
+        times_ps = np.asarray(traj.time, dtype=float)
+
+    return ring_xyz, atom_names, base_name, times_ps
 
 
 def compute_puckering(ring_xyz):
@@ -294,6 +304,58 @@ def describe_conformation(row, ring_size):
     if ring_size == PYRANOSE_SIZE:
         return get_strict_conformation(row[COL_THETA], row[COL_PHI])
     return furanose.get_furanose_conformation(row[COL_P])
+
+
+def conformer_tex(label):
+    """
+    LaTeX form of a conformer label, e.g. "1S3" -> "$^1S_3$".
+
+    Falls back to the plain string for anything that is not a conformer, such as
+    "Undefined" or the "Other" bucket of the populations chart.
+    """
+    return LABEL_TO_TEX.get(label, furanose.LABEL_TO_TEX.get(label, label))
+
+
+def make_progress_axis(n_frames, times_ps=None, timestep_ps=None):
+    """
+    Builds the x-axis shared by every per-frame plot.
+
+    Args:
+        n_frames (int): number of frames.
+        times_ps (numpy.ndarray): per-frame times in ps, or None.
+        timestep_ps (float): ps between frames; overrides times_ps when given.
+
+    Returns:
+        tuple: (values, label). Falls back to 1-based frame numbers labelled
+               "Frame" when there is no trustworthy time information -- a
+               trajectory whose stored times are just 0, 1, 2, ... is reporting
+               frame indices, not picoseconds, and labelling those "ps" would be
+               a quiet lie.
+    """
+    frames = np.arange(n_frames, dtype=float)
+
+    if timestep_ps:
+        values = frames * float(timestep_ps)
+    elif times_ps is not None and len(times_ps) == n_frames:
+        values = np.asarray(times_ps, dtype=float)
+    else:
+        return frames + 1.0, "Frame"
+
+    if not np.all(np.isfinite(values)) or (n_frames > 1 and np.ptp(values) <= 0):
+        return frames + 1.0, "Frame"
+
+    # Nanoseconds once picoseconds would run into the thousands.
+    if np.max(np.abs(values)) >= 1000.0:
+        return values / 1000.0, "Time (ns)"
+    return values, "Time (ps)"
+
+
+def looks_like_frame_indices(times):
+    """True when a trajectory's stored times are just 0, 1, 2, ... -- i.e. absent."""
+    times = np.asarray(times, dtype=float)
+    if times.size < 2:
+        return True
+    return np.allclose(times, np.arange(times.size, dtype=float))
 
 
 def conformer_order(ring_size):
@@ -442,6 +504,29 @@ def parse_contour_step(value, default=1.0):
         raise AnalysisError(f"Contour spacing must be a number; got {value!r}.") from None
     if step <= 0:
         raise AnalysisError(f"Contour spacing must be greater than zero; got {step}.")
+    return step
+
+
+def parse_timestep(value):
+    """
+    Parses the picoseconds-per-frame typed by a user.
+
+    Blank/None means "no time information": the plots then use frame numbers.
+
+    Raises:
+        AnalysisError: if it is not a positive number.
+    """
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return None
+    try:
+        step = float(text)
+    except ValueError:
+        raise AnalysisError(
+            f"Timestep must be a number of picoseconds per frame; got {value!r}."
+        ) from None
+    if step <= 0:
+        raise AnalysisError(f"Timestep must be greater than zero; got {step}.")
     return step
 
 

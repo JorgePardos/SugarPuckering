@@ -19,6 +19,7 @@ from .analysis import (  # noqa: E402  (must follow the backend selection)
     describe_conformation,
     load_fel,
     load_ring_coordinates,
+    make_progress_axis,
     parse_contour_step,
     parse_energy_max,
     parse_indices,
@@ -40,7 +41,7 @@ from .plotting import (  # noqa: E402
 
 def _run_structural(args, mode):
     indices = parse_indices(args.indices)
-    ring_xyz, atom_names, base_name = load_ring_coordinates(
+    ring_xyz, atom_names, base_name, times_ps = load_ring_coordinates(
         mode,
         indices,
         pdb_files=getattr(args, "files", None),
@@ -54,6 +55,9 @@ def _run_structural(args, mode):
     print(f"Ring atoms resolved to: {', '.join(atom_names)}")
 
     results = compute_puckering(ring_xyz)
+    progress, progress_label = make_progress_axis(len(results), times_ps, args.timestep)
+    print(f"Progress axis: {progress_label}")
+    axis = {"progress": progress, "progress_label": progress_label}
     job_dir, prefix, label = prepare_output_dir(args.job, base_name, args.outdir)
 
     dat_path = f"{prefix}_params.dat"
@@ -63,9 +67,9 @@ def _run_structural(args, mode):
     written = []
     if ring_size == PYRANOSE_SIZE:
         if len(results) > 1:
-            written.append(plot_time_series(results, prefix, title=label))
-        written.append(plot_mercator(results, prefix, title=label))
-        written.append(plot_stoddart(results, prefix, title=label))
+            written.append(plot_time_series(results, prefix, title=label, **axis))
+        written.append(plot_mercator(results, prefix, title=label, **axis))
+        written.append(plot_stoddart(results, prefix, title=label, **axis))
         if args.fel:
             fel_data, _ = load_fel(args.fel)
             written.append(plot_fel_mercator(
@@ -74,12 +78,13 @@ def _run_structural(args, mode):
                 suffix="_on_FEL"))
     else:
         if len(results) > 1:
-            written.append(plot_furanose_time_series(results, prefix, title=label))
+            written.append(plot_furanose_time_series(results, prefix, title=label, **axis))
         written.append(plot_pseudorotation_wheel(results, prefix, title=label))
 
     # Summaries only say something once there is a distribution to summarise.
     if len(results) > 1:
-        written.append(plot_conformer_timeline(results, prefix, ring_size, title=label))
+        written.append(plot_conformer_timeline(results, prefix, ring_size,
+                                               title=label, **axis))
         written.append(plot_conformer_populations(results, prefix, ring_size, title=label))
         written.append(plot_amplitude_histogram(results, prefix, title=label))
 
@@ -143,6 +148,11 @@ def build_parser():
                        help="angle units of the --fel file")
         p.add_argument("--energy-label", default="Free Energy (kcal/mol)",
                        help="colourbar label for the --fel file")
+        # Trajectory files routinely store 0, 1, 2, ... as their times, so the
+        # spacing has to be stated rather than guessed.
+        p.add_argument("--timestep", type=float, default=None,
+                       help="picoseconds between frames; switches the time axes "
+                            "from frame number to simulation time")
 
     p_pdb = sub.add_parser("pdb", help="analyse one or more static PDB structures")
     p_pdb.add_argument("--files", nargs="+", required=True, help="PDB file(s)")

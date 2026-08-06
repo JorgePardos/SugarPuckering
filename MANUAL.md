@@ -188,9 +188,10 @@ says *when*, and in what order. For a reaction path the timeline is usually the 
 vertical axis follows the canonical conformer sequence (⁴C₁ → northern band → equator → southern band
 → ¹C₄), so an itinerary reads as a path rather than as an arbitrary reshuffling.
 
-On the Mercator and Stoddart plots consecutive frames are joined, so the itinerary reads as a route.
-The path is broken where φ crosses 0/360, since a step from 355° to 5° is a small move on a periodic
-axis but a line straight across the map if drawn literally.
+Points are drawn without connecting lines; the colour carries the order. Passing `connect=True` to
+`plot_mercator` or `plot_stoddart` joins consecutive frames when a short path is easier to follow than
+a colour ramp — the line is broken where φ crosses 0/360, since a step from 355° to 5° is a small move
+on a periodic axis but a line straight across the map if drawn literally.
 
 ---
 
@@ -208,10 +209,28 @@ axis but a line straight across the map if drawn literally.
 | GUI | CLI | Default | What it does |
 |---|---|---|---|
 | Ring Atom Indices | `--indices` | — | 6 indices for a pyranose, 5 for a furanose |
+| Timestep (ps/frame) | `--timestep` | blank | puts the per-frame plots on a time axis instead of frame numbers |
 | Skip the closed-ring check | `--skip-ring-check` | off | proceed even if the atoms are not bonded as a ring |
 | Project onto FEL | `--fel` | none | also draw the result on this free energy surface |
 | Angle units | `--angle-units` | `auto` | units of the projected surface |
 | Energy label | `--energy-label` | `Free Energy (kcal/mol)` | colourbar label of the projected surface |
+
+### Putting the plots on a time axis
+
+By default the per-frame plots are drawn against the frame number. Give `--timestep` (picoseconds
+between frames) and they switch to simulation time, automatically labelled in ps or, past a thousand,
+in ns.
+
+The spacing has to be stated because it usually cannot be read from the file. Trajectory writers
+routinely leave the time field unset, and the reader then hands back 0, 1, 2, … — frame indices
+wearing time units. The program treats exactly that pattern as "no time information" and stays on
+frame numbers rather than labelling indices as picoseconds. A trajectory that does carry real times is
+used automatically; `--timestep` overrides it either way.
+
+```bash
+# 382 frames over 100 ps
+python -m src.cli md --top system.prmtop --traj run.dcd --indices "..." --timestep 0.2618
+```
 
 `--skip-ring-check` exists for topologies with missing or wrong bond records. If the check fires,
 the far more likely explanation is a wrong index — read the error, it names the atoms it found.

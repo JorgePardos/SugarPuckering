@@ -48,6 +48,9 @@ FURANOSE_LABELS_TEX = [
 
 assert len(IDEAL_P) == len(FURANOSE_LABELS) == len(FURANOSE_LABELS_TEX) == 20
 
+# Plain label -> LaTeX, mirroring math_core.LABEL_TO_TEX for the pyranose case.
+LABEL_TO_TEX = dict(zip(FURANOSE_LABELS, FURANOSE_LABELS_TEX))
+
 UNDEFINED_LABEL = "Undefined"
 
 

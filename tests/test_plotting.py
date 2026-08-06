@@ -209,9 +209,11 @@ def test_conformer_timeline_orders_the_axis_by_latitude(tmp_path):
     finally:
         pyplot.subplots = original
 
+    from src.analysis import conformer_tex
+
     names = [t.get_text() for t in captured["ax"].get_yticklabels()]
-    # 4C1 (north pole) below, then the equator, then 1C4 (south pole) on top
-    assert names.index("4C1") < names.index("5S1") < names.index("1C4")
+    # Ticks are rendered as LaTeX, so compare against the TeX forms
+    assert names == [conformer_tex(n) for n in ("4C1", "5S1", "1C4")]
 
 
 def test_timeline_does_not_leak_figures(trajectory_results, tmp_path):

@@ -76,7 +76,7 @@ def test_auto_unit_detection_agrees_with_explicit_radians(tmp_path):
                     reason="tests/data/PDBs absent")
 def test_the_chair_structure_is_assigned_as_a_chair():
     pytest.importorskip("mdtraj")
-    ring_xyz, atom_names, _ = load_ring_coordinates(
+    ring_xyz, atom_names, _, _times = load_ring_coordinates(
         "PDB", _indices(PDB_RING), pdb_files=[os.path.join(PDB_DIR, "4C1.pdb")])
     assert [n.split("-")[-1] for n in atom_names] == ["O5", "C1", "C2", "C3", "C4", "C5"]
 
@@ -88,7 +88,7 @@ def test_the_chair_structure_is_assigned_as_a_chair():
 @needs_traj
 def test_trajectory_ring_is_a_real_ring_and_gives_sane_values():
     pytest.importorskip("mdtraj")
-    ring_xyz, atom_names, _ = load_ring_coordinates(
+    ring_xyz, atom_names, _, _times = load_ring_coordinates(
         "MD", _indices(TRAJ_RING), topology=PRMTOP, trajectory=DCD)
     assert [n.split("-")[-1] for n in atom_names] == ["O5", "C1", "C2", "C3", "C4", "C5"]
 

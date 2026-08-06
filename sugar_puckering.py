@@ -25,9 +25,11 @@ from src.analysis import (  # noqa: E402
     describe_conformation,
     load_fel,
     load_ring_coordinates,
+    make_progress_axis,
     parse_contour_step,
     parse_energy_max,
     parse_indices,
+    parse_timestep,
     prepare_output_dir,
     write_params_dat,
 )
@@ -76,6 +78,7 @@ class PuckeringApp:
         self.unsampled_var = tk.StringVar(value="mask")
         self.overlay_fel_path = tk.StringVar()
         self.skip_ring_check_var = tk.BooleanVar(value=False)
+        self.timestep_var = tk.StringVar(value="")
 
         # Header
         tk.Label(root, text="Conformational Analysis",
@@ -187,6 +190,8 @@ class PuckeringApp:
                            variable=self.skip_ring_check_var).grid(
                 row=row, column=0, columnspan=3, sticky="w")
             row += 1
+            row = self._add_entry(row, "Timestep (ps/frame):", self.timestep_var,
+                                  "--timestep   (blank = x axis in frames)", width=10)
 
             tk.Label(self.frame_options, text="Project onto FEL (optional):").grid(
                 row=row, column=0, sticky="w", pady=2)
@@ -291,6 +296,7 @@ class PuckeringApp:
             # Validate the options here, on the UI thread, so a typo in a text
             # field is reported before any file is read.
             self._plot_options()
+            parse_timestep(self.timestep_var.get())
             if mode == "FEL":
                 job = ("FEL", {"path": self.fel_path.get().strip()})
             else:
@@ -328,15 +334,20 @@ class PuckeringApp:
                 payload = {"mode": "FEL", "data": data, "prefix": prefix, "label": label}
             else:
                 ring_size = len(params["indices"])
-                ring_xyz, atom_names, base_name = load_ring_coordinates(mode, **params)
+                ring_xyz, atom_names, base_name, times_ps = load_ring_coordinates(
+                    mode, **params)
                 self.root.after(0, self.status_var.set,
                                 f"Computing {ring_xyz.shape[0]} frame(s)...")
                 results = compute_puckering(ring_xyz)
+                progress, progress_label = make_progress_axis(
+                    len(results), times_ps, parse_timestep(self.timestep_var.get()))
                 _dir, prefix, label = prepare_output_dir(job_name, base_name)
                 write_params_dat(results, f"{prefix}_params.dat", atom_names, ring_size)
                 payload = {"mode": mode, "results": results, "prefix": prefix,
                            "label": label, "atom_names": atom_names,
-                           "ring_size": ring_size, "overlay_surface": None}
+                           "ring_size": ring_size, "overlay_surface": None,
+                           "axis": {"progress": progress,
+                                    "progress_label": progress_label}}
 
                 overlay_path = self.overlay_fel_path.get().strip()
                 if overlay_path and ring_size == PYRANOSE_SIZE:
@@ -364,11 +375,12 @@ class PuckeringApp:
             else:
                 results = payload["results"]
                 ring_size = payload["ring_size"]
+                axis = payload["axis"]
                 if ring_size == PYRANOSE_SIZE:
                     if len(results) > 1:
-                        plot_time_series(results, prefix, title=label)
-                    plot_mercator(results, prefix, title=label)
-                    plot_stoddart(results, prefix, title=label)
+                        plot_time_series(results, prefix, title=label, **axis)
+                    plot_mercator(results, prefix, title=label, **axis)
+                    plot_stoddart(results, prefix, title=label, **axis)
                     ring_type = "pyranose"
                     if payload["overlay_surface"] is not None:
                         plot_fel_mercator(payload["overlay_surface"], prefix,
@@ -376,12 +388,12 @@ class PuckeringApp:
                                           suffix="_on_FEL", **options)
                 else:
                     if len(results) > 1:
-                        plot_furanose_time_series(results, prefix, title=label)
+                        plot_furanose_time_series(results, prefix, title=label, **axis)
                     plot_pseudorotation_wheel(results, prefix, title=label)
                     ring_type = "furanose"
 
                 if len(results) > 1:
-                    plot_conformer_timeline(results, prefix, ring_size, title=label)
+                    plot_conformer_timeline(results, prefix, ring_size, title=label, **axis)
                     plot_conformer_populations(results, prefix, ring_size, title=label)
                     plot_amplitude_histogram(results, prefix, title=label)
 

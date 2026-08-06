@@ -68,6 +68,30 @@ NORTH_LABELS      = ["OE",   "OH1", "E1",   "2H1", "2E",   "2H3",
 SOUTH_LABELS      = ["3E",   "3H4", "E4",   "5H4", "5E",   "5HO",
                      "EO",   "1HO", "1E",   "1H2", "E2",   "3H2"]
 
+# LaTeX form of each sector label, for axis ticks and annotations. Kept identical
+# to the corresponding entries of LABELS_TEX so every figure spells a conformer
+# the same way.
+NORTH_LABELS_TEX = [r"$^OE$", r"$^OH_1$", r"$E_1$", r"$^2H_1$", r"$^2E$", r"$^2H_3$",
+                    r"$E_3$", r"$^4H_3$", r"$^4E$", r"$^4H_5$", r"$E_5$", r"$^OH_5$"]
+EQUATORIAL_LABELS_TEX = [r"$^{3O}B$", r"$^3S_1$", r"$B_{14}$", r"$^5S_1$", r"$^{25}B$",
+                         r"$^2S_O$", r"$B_{3O}$", r"$^1S_3$", r"$^{14}B$", r"$^1S_5$",
+                         r"$B_{25}$", r"$^OS_2$"]
+SOUTH_LABELS_TEX = [r"$^3E$", r"$^3H_4$", r"$E_4$", r"$^5H_4$", r"$^5E$", r"$^5H_O$",
+                    r"$E_O$", r"$^1H_O$", r"$^1E$", r"$^1H_2$", r"$E_2$", r"$^3H_2$"]
+
+CHAIR_LABELS_TEX = {"4C1": r"$^4C_1$", "1C4": r"$^1C_4$"}
+
+# Plain label -> LaTeX, for every pyranose conformer the assignment can return.
+LABEL_TO_TEX = dict(CHAIR_LABELS_TEX)
+for _plain, _tex in zip(NORTH_LABELS + EQUATORIAL_LABELS + SOUTH_LABELS,
+                        NORTH_LABELS_TEX + EQUATORIAL_LABELS_TEX + SOUTH_LABELS_TEX):
+    LABEL_TO_TEX[_plain] = _tex
+
+assert len(LABEL_TO_TEX) == 38, (
+    "Every pyranose conformer needs exactly one LaTeX form: 2 chairs plus three "
+    "bands of 12."
+)
+
 # Returned when Theta or Phi is not a finite number, i.e. when the upstream
 # geometry was degenerate. Never returned for a well-formed ring.
 UNDEFINED_LABEL = "Undefined"

@@ -12,7 +12,11 @@ from src.analysis import (
     COL_Q,
     COL_THETA,
     compute_puckering,
+    conformer_order,
+    conformer_tex,
     load_fel,
+    looks_like_frame_indices,
+    make_progress_axis,
     parse_contour_step,
     parse_energy_max,
     parse_indices,
@@ -282,6 +286,82 @@ def test_contour_step_must_be_positive(value):
 def test_contour_step_must_be_a_number(value):
     with pytest.raises(AnalysisError, match="must be a number"):
         parse_contour_step(value)
+
+
+# --------------------------------------------------------------------------
+# the progress (time) axis
+# --------------------------------------------------------------------------
+
+def test_progress_falls_back_to_frame_numbers():
+    values, label = make_progress_axis(4)
+    assert list(values) == [1.0, 2.0, 3.0, 4.0]
+    assert label == "Frame"
+
+
+def test_timestep_turns_the_axis_into_picoseconds():
+    values, label = make_progress_axis(4, timestep_ps=0.25)
+    assert list(values) == [0.0, 0.25, 0.5, 0.75]
+    assert label == "Time (ps)"
+
+
+def test_long_runs_switch_to_nanoseconds():
+    values, label = make_progress_axis(3, timestep_ps=1000.0)
+    assert label == "Time (ns)"
+    assert list(values) == [0.0, 1.0, 2.0]
+
+
+def test_stored_times_are_used_when_present():
+    values, label = make_progress_axis(3, times_ps=np.array([0.0, 0.5, 1.0]))
+    assert list(values) == [0.0, 0.5, 1.0]
+    assert label == "Time (ps)"
+
+
+def test_timestep_overrides_stored_times():
+    values, _ = make_progress_axis(3, times_ps=np.array([9.0, 9.5, 10.0]), timestep_ps=2.0)
+    assert list(values) == [0.0, 2.0, 4.0]
+
+
+def test_constant_times_are_not_a_time_axis():
+    """A trajectory reporting the same time for every frame says nothing."""
+    _, label = make_progress_axis(3, times_ps=np.array([5.0, 5.0, 5.0]))
+    assert label == "Frame"
+
+
+@pytest.mark.parametrize("times, expected", [
+    ([0, 1, 2, 3], True),        # frame indices wearing time units
+    ([0.0, 0.25, 0.5], False),   # a real timestep
+    ([0, 1], True),
+    ([7.0], True),               # too short to tell; assume absent
+])
+def test_frame_index_times_are_recognised(times, expected):
+    assert looks_like_frame_indices(np.array(times, dtype=float)) is expected
+
+
+# --------------------------------------------------------------------------
+# conformer labels in LaTeX
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("plain, tex", [
+    ("4C1", r"$^4C_1$"), ("1C4", r"$^1C_4$"),
+    ("1S3", r"$^1S_3$"), ("5S1", r"$^5S_1$"), ("B2,5", r"$B_{25}$"),
+    ("OE", r"$^OE$"), ("2H3", r"$^2H_3$"), ("EO", r"$E_O$"),
+    ("3E", r"$^3E$"),            # furanose and pyranose share this one
+    ("3T2", r"$^3T_2$"), ("OT4", r"$^OT_4$"),   # furanose only
+])
+def test_conformer_labels_have_a_latex_form(plain, tex):
+    assert conformer_tex(plain) == tex
+
+
+@pytest.mark.parametrize("label", ["Undefined", "Other", ""])
+def test_non_conformers_pass_through_unchanged(label):
+    assert conformer_tex(label) == label
+
+
+def test_every_assignable_conformer_has_a_latex_form():
+    """Nothing the assignment can return may fall through as raw text."""
+    for ring_size in (5, 6):
+        for name in conformer_order(ring_size):
+            assert conformer_tex(name).startswith("$"), name
 
 
 # --------------------------------------------------------------------------
