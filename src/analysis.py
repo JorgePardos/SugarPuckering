@@ -9,6 +9,7 @@ unless a structural mode is actually used (mdtraj is imported lazily).
 
 import os
 import struct
+from typing import NamedTuple
 
 import numpy as np
 
@@ -106,6 +107,60 @@ def parse_indices(text):
     return [i - 1 for i in indices]
 
 
+class RingSelection(NamedTuple):
+    """What load_ring_coordinates() hands back."""
+
+    xyz: np.ndarray          # (n_selected, n_ring_atoms, 3) in Angstrom
+    atom_names: list         # resolved ring atoms, in the requested order
+    base_name: str           # name derived from the input file
+    times_ps: object         # per-frame times, or None when the file has none
+    frames: np.ndarray       # 0-based indices of the selected frames in the file
+    total_frames: int        # how many frames the file holds, before selection
+
+
+def select_frames(n_frames, start=None, stop=None, stride=None):
+    """
+    Turns a user-facing frame range into 0-based indices.
+
+    The range is 1-based and inclusive, matching the frame numbers the program
+    prints and writes: "--start 500 --stop 1000" means exactly the frames labelled
+    500 to 1000 in the output table. Defaults cover the whole trajectory.
+
+    Returns:
+        numpy.ndarray: the selected 0-based frame indices.
+
+    Raises:
+        AnalysisError: on a range that is empty, reversed, or off the end.
+    """
+    first = 1 if start is None else int(start)
+    last = n_frames if stop is None else int(stop)
+    step = 1 if stride is None else int(stride)
+
+    if step < 1:
+        raise AnalysisError(f"Stride must be at least 1; got {step}.")
+    if first < 1:
+        raise AnalysisError(
+            f"Start frame must be at least 1 (frames are numbered from 1); got {first}.")
+    if last > n_frames:
+        raise AnalysisError(
+            f"Stop frame {last} is past the end: the trajectory has {n_frames} frames.")
+    if first > last:
+        raise AnalysisError(
+            f"Start frame {first} is after stop frame {last}; the range is empty.")
+
+    return np.arange(first - 1, last, step)
+
+
+def describe_frame_range(frames, n_frames):
+    """One-line description of a selection, or None when it is the whole thing."""
+    if len(frames) == n_frames and (len(frames) < 2 or frames[1] - frames[0] == 1):
+        return None
+    step = int(frames[1] - frames[0]) if len(frames) > 1 else 1
+    every = "" if step == 1 else f" every {step}"
+    return (f"frames {frames[0] + 1}-{frames[-1] + 1}{every} "
+            f"({len(frames)} of {n_frames})")
+
+
 def check_ring_connectivity(structure_topology, indices, atom_names):
     """
     Verifies the six chosen atoms really form a closed ring.
@@ -149,7 +204,7 @@ def check_ring_connectivity(structure_topology, indices, atom_names):
 
 
 def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajectory=None,
-                          check_ring=True):
+                          check_ring=True, start=None, stop=None, stride=None):
     """
     Loads the trajectory and returns only the ring atoms, in the requested order.
 
@@ -165,11 +220,12 @@ def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajecto
         pdb_files (list[str]): PDB paths, for mode "PDB".
         topology (str), trajectory (str): paths, for mode "MD".
 
+        start, stop, stride: 1-based inclusive frame range; defaults to all of it.
+
     Returns:
-        tuple: (ring_xyz, atom_names, base_name, times_ps) where ring_xyz has
-               shape (n_frames, n_ring_atoms, 3) in Angstrom, and times_ps holds
-               the per-frame times or None when the trajectory does not really
-               carry them.
+        RingSelection: coordinates in Angstrom, the resolved atom names, a base
+                       name for the outputs, the per-frame times (or None), and
+                       the 0-based indices of the frames actually taken.
 
     Raises:
         AnalysisError: on missing files, missing mdtraj, or out-of-range indices.
@@ -237,7 +293,8 @@ def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajecto
 
     # Map each requested index to its position in the sorted selection.
     order = [sorted_indices.index(i) for i in indices]
-    ring_xyz = traj.xyz[:, order, :] * NM_TO_ANGSTROM
+    selected = select_frames(traj.n_frames, start, stop, stride)
+    ring_xyz = traj.xyz[selected][:, order, :] * NM_TO_ANGSTROM
     atom_names = [str(traj.topology.atom(k)) for k in order]
 
     if check_ring:
@@ -251,12 +308,13 @@ def load_ring_coordinates(mode, indices, pdb_files=None, topology=None, trajecto
     # along times that say something a frame number does not.
     times_ps = None
     if getattr(traj, "time", None) is not None and not looks_like_frame_indices(traj.time):
-        times_ps = np.asarray(traj.time, dtype=float)
+        times_ps = np.asarray(traj.time, dtype=float)[selected]
 
-    return ring_xyz, atom_names, base_name, times_ps
+    return RingSelection(ring_xyz, atom_names, base_name, times_ps,
+                         selected, traj.n_frames)
 
 
-def compute_puckering(ring_xyz):
+def compute_puckering(ring_xyz, frames=None):
     """
     Evaluates the puckering coordinates for every frame.
 
@@ -268,6 +326,10 @@ def compute_puckering(ring_xyz):
 
     Args:
         ring_xyz (numpy.ndarray): (n_frames, n_ring_atoms, 3) coordinates in Angstrom.
+        frames (numpy.ndarray): 0-based index of each row in the source
+                       trajectory. Defaults to 0..n-1. Analysing a sub-range must
+                       still report the original frame numbers, or the output
+                       cannot be lined up against the trajectory it came from.
 
     Returns:
         numpy.ndarray: (n_frames, 4), frame_index 0-based.
@@ -288,17 +350,22 @@ def compute_puckering(ring_xyz):
             f"{' or '.join(str(n) for n in RING_SIZES)} atoms."
         )
 
+    numbers = np.arange(n_frames) if frames is None else np.asarray(frames, dtype=int)
+    if len(numbers) != n_frames:
+        raise AnalysisError(
+            f"Got {len(numbers)} frame numbers for {n_frames} frames of coordinates.")
+
     output = np.zeros((n_frames, 4), dtype=float)
-    for frame in range(n_frames):
+    for row in range(n_frames):
         try:
             if ring_size == PYRANOSE_SIZE:
-                Q, second, third = calculate_cremer_pople(ring_xyz[frame])
+                Q, second, third = calculate_cremer_pople(ring_xyz[row])
             else:
-                Q, _phi = furanose.calculate_cremer_pople_furanose(ring_xyz[frame])
-                second, third = furanose.calculate_pseudorotation(ring_xyz[frame])
+                Q, _phi = furanose.calculate_cremer_pople_furanose(ring_xyz[row])
+                second, third = furanose.calculate_pseudorotation(ring_xyz[row])
         except ValueError as exc:
-            raise AnalysisError(f"Frame {frame + 1}: {exc}") from None
-        output[frame, :] = [frame, Q, second, third]
+            raise AnalysisError(f"Frame {numbers[row] + 1}: {exc}") from None
+        output[row, :] = [numbers[row], Q, second, third]
 
     return output
 
@@ -320,12 +387,15 @@ def conformer_tex(label):
     return LABEL_TO_TEX.get(label, furanose.LABEL_TO_TEX.get(label, label))
 
 
-def make_progress_axis(n_frames, times_ps=None, timestep_ps=None):
+def make_progress_axis(frames, times_ps=None, timestep_ps=None):
     """
     Builds the x-axis shared by every per-frame plot.
 
     Args:
-        n_frames (int): number of frames.
+        frames (int or numpy.ndarray): frame count, or the 0-based frame indices
+                       when a sub-range was analysed -- the time of a frame is set
+                       by its position in the trajectory, not by its row here, so
+                       a slice starting at frame 500 starts at 500 * timestep.
         times_ps (numpy.ndarray): per-frame times in ps, or None.
         timestep_ps (float): ps between frames; overrides times_ps when given.
 
@@ -337,17 +407,19 @@ def make_progress_axis(n_frames, times_ps=None, timestep_ps=None):
                a quiet lie. NetCDF, XTC and TRR round-trip real times and are
                used automatically; DCD does not (see load_ring_coordinates).
     """
-    frames = np.arange(n_frames, dtype=float)
+    numbers = (np.arange(frames, dtype=float) if np.isscalar(frames)
+               else np.asarray(frames, dtype=float))
+    n_frames = len(numbers)
 
     if timestep_ps:
-        values = frames * float(timestep_ps)
+        values = numbers * float(timestep_ps)
     elif times_ps is not None and len(times_ps) == n_frames:
         values = np.asarray(times_ps, dtype=float)
     else:
-        return frames + 1.0, "Frame"
+        return numbers + 1.0, "Frame"
 
     if not np.all(np.isfinite(values)) or (n_frames > 1 and np.ptp(values) <= 0):
-        return frames + 1.0, "Frame"
+        return numbers + 1.0, "Frame"
 
     # Nanoseconds once picoseconds would run into the thousands.
     if np.max(np.abs(values)) >= 1000.0:
@@ -378,7 +450,8 @@ def conformer_order(ring_size):
     return list(furanose.FURANOSE_LABELS)
 
 
-def write_params_dat(results, path, atom_names=None, ring_size=PYRANOSE_SIZE):
+def write_params_dat(results, path, atom_names=None, ring_size=PYRANOSE_SIZE,
+                     frame_range=None):
     """
     Writes the per-frame parameter table.
 
@@ -391,6 +464,9 @@ def write_params_dat(results, path, atom_names=None, ring_size=PYRANOSE_SIZE):
         atom_names (list[str]): resolved ring atom names, recorded in the header
                                 so the selection can be checked after the fact.
         ring_size (int): 6 for a pyranose, 5 for a furanose; sets the column names.
+        frame_range (str): description of the analysed sub-range, from
+                           describe_frame_range(). Recorded in the header so a
+                           partial analysis cannot be mistaken for a whole one.
     """
     if ring_size == PYRANOSE_SIZE:
         columns, units = ("Theta(deg)", "Phi(deg)"), "Theta and Phi in degrees"
@@ -402,6 +478,8 @@ def write_params_dat(results, path, atom_names=None, ring_size=PYRANOSE_SIZE):
         handle.write(f"# {ring_size}-membered ring ({ring_type})\n")
         if atom_names:
             handle.write(f"# Ring atoms (in order): {', '.join(atom_names)}\n")
+        if frame_range:
+            handle.write(f"# Analysed {frame_range}\n")
         handle.write(f"# Q in Angstrom; {units}\n")
         # The column header is commented too, so the whole file loads with a bare
         # numpy.loadtxt(). The leading '#' takes one of the 8 header columns so
@@ -619,6 +697,27 @@ def resolve_timestep(trajectory, timestep_ps=None, n_frames=None):
                 f"pass --timestep to set the axis"
             )
     return None, None
+
+
+def parse_frame_number(value, what="Frame number"):
+    """
+    Parses a frame number or stride typed by a user.
+
+    Blank/None means "not set", which the frame range reads as its default.
+
+    Raises:
+        AnalysisError: if it is not a positive whole number.
+    """
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return None
+    try:
+        number = int(text)
+    except ValueError:
+        raise AnalysisError(f"{what} must be a whole number; got {value!r}.") from None
+    if number < 1:
+        raise AnalysisError(f"{what} must be at least 1; got {number}.")
+    return number
 
 
 def parse_timestep(value):

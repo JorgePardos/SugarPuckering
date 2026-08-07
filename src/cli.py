@@ -17,6 +17,7 @@ from .analysis import (  # noqa: E402  (must follow the backend selection)
     PYRANOSE_SIZE,
     compute_puckering,
     describe_conformation,
+    describe_frame_range,
     load_fel,
     load_ring_coordinates,
     make_progress_axis,
@@ -42,23 +43,31 @@ from .plotting import (  # noqa: E402
 
 def _run_structural(args, mode):
     indices = parse_indices(args.indices)
-    ring_xyz, atom_names, base_name, times_ps = load_ring_coordinates(
+    selection = load_ring_coordinates(
         mode,
         indices,
         pdb_files=getattr(args, "files", None),
         topology=getattr(args, "top", None),
         trajectory=getattr(args, "traj", None),
         check_ring=not args.skip_ring_check,
+        start=args.start, stop=args.stop, stride=args.stride,
     )
+    ring_xyz = selection.xyz
+    atom_names = selection.atom_names
+    base_name = selection.base_name
     ring_size = len(indices)
     ring_type = "pyranose" if ring_size == PYRANOSE_SIZE else "furanose"
     print(f"{ring_size}-membered ring ({ring_type})")
     print(f"Ring atoms resolved to: {', '.join(atom_names)}")
 
-    results = compute_puckering(ring_xyz)
+    results = compute_puckering(ring_xyz, selection.frames)
+    frame_range = describe_frame_range(selection.frames, selection.total_frames)
+    if frame_range:
+        print(f"Analysing {frame_range}")
     timestep, timestep_note = resolve_timestep(getattr(args, "traj", None),
                                                args.timestep, len(results))
-    progress, progress_label = make_progress_axis(len(results), times_ps, timestep)
+    progress, progress_label = make_progress_axis(selection.frames,
+                                                  selection.times_ps, timestep)
     if timestep and timestep_note:
         span = timestep * (len(results) - 1)
         print(f"Timestep: {timestep:g} ps/frame, {timestep_note} "
@@ -70,7 +79,7 @@ def _run_structural(args, mode):
     job_dir, prefix, label = prepare_output_dir(args.job, base_name, args.outdir)
 
     dat_path = f"{prefix}_params.dat"
-    write_params_dat(results, dat_path, atom_names, ring_size)
+    write_params_dat(results, dat_path, atom_names, ring_size, frame_range)
     print(f"Wrote {dat_path}  ({len(results)} frame(s))")
 
     written = []
@@ -157,8 +166,17 @@ def build_parser():
                        help="angle units of the --fel file")
         p.add_argument("--energy-label", default="Free Energy (kcal/mol)",
                        help="colourbar label for the --fel file")
-        # DCD loses the per-frame time, so for those the spacing has to be
-        # stated. NetCDF, XTC and TRR keep it and need no flag.
+        # Analysing a window of a long trajectory -- skipping equilibration, or
+        # thinning a run too big to plot point by point.
+        p.add_argument("--start", type=int, default=None,
+                       help="first frame to analyse, 1-based (default: the first)")
+        p.add_argument("--stop", type=int, default=None,
+                       help="last frame to analyse, 1-based and inclusive "
+                            "(default: the last)")
+        p.add_argument("--stride", type=int, default=None,
+                       help="analyse every Nth frame (default: every one)")
+        # DCD loses the per-frame time, so there the spacing has to be stated.
+        # NetCDF, XTC and TRR keep it and need no flag.
         p.add_argument("--timestep", type=float, default=None,
                        help="picoseconds between frames; needed for DCD, which "
                             "does not store per-frame times (NetCDF/XTC/TRR do)")

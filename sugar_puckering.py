@@ -23,11 +23,13 @@ from src.analysis import (  # noqa: E402
     PYRANOSE_SIZE,
     compute_puckering,
     describe_conformation,
+    describe_frame_range,
     load_fel,
     load_ring_coordinates,
     make_progress_axis,
     parse_contour_step,
     parse_energy_max,
+    parse_frame_number,
     parse_indices,
     parse_timestep,
     prepare_output_dir,
@@ -80,6 +82,9 @@ class PuckeringApp:
         self.overlay_fel_path = tk.StringVar()
         self.skip_ring_check_var = tk.BooleanVar(value=False)
         self.timestep_var = tk.StringVar(value="")
+        self.start_var = tk.StringVar(value="")
+        self.stop_var = tk.StringVar(value="")
+        self.stride_var = tk.StringVar(value="")
 
         # Header
         tk.Label(root, text="Conformational Analysis",
@@ -193,6 +198,7 @@ class PuckeringApp:
             row += 1
             row = self._add_entry(row, "Timestep (ps/frame):", self.timestep_var,
                                   "--timestep   (blank = x axis in frames)", width=10)
+            row = self._add_frame_range(row)
 
             tk.Label(self.frame_options, text="Project onto FEL (optional):").grid(
                 row=row, column=0, sticky="w", pady=2)
@@ -224,6 +230,29 @@ class PuckeringApp:
         row = self._add_entry(row, "Energy label:", self.energy_label_var,
                               "--energy-label", width=26)
         return row
+
+    def _add_frame_range(self, row):
+        """One compact row for the frame window; blank fields mean the whole run."""
+        tk.Label(self.frame_options, text="Frames:").grid(row=row, column=0, sticky="w",
+                                                          pady=2)
+        holder = tk.Frame(self.frame_options)
+        holder.grid(row=row, column=1, sticky="w", padx=4)
+        for label, variable in (("from", self.start_var), ("to", self.stop_var),
+                                ("every", self.stride_var)):
+            tk.Label(holder, text=label).pack(side="left")
+            tk.Entry(holder, textvariable=variable, width=6).pack(side="left", padx=(2, 6))
+        tk.Label(self.frame_options, text="--start / --stop / --stride   (blank = all)",
+                 fg="gray", font=("Helvetica", 8, "italic")).grid(row=row, column=2,
+                                                                  sticky="w")
+        return row + 1
+
+    def _frame_range(self):
+        """Validated frame window, as keyword arguments for load_ring_coordinates()."""
+        return {
+            "start": parse_frame_number(self.start_var.get(), "Start frame"),
+            "stop": parse_frame_number(self.stop_var.get(), "Stop frame"),
+            "stride": parse_frame_number(self.stride_var.get(), "Stride"),
+        }
 
     def _add_option_menu(self, row, label, variable, choices, flag):
         tk.Label(self.frame_options, text=label).grid(row=row, column=0, sticky="w", pady=2)
@@ -298,12 +327,14 @@ class PuckeringApp:
             # field is reported before any file is read.
             self._plot_options()
             parse_timestep(self.timestep_var.get())
+            self._frame_range()
             if mode == "FEL":
                 job = ("FEL", {"path": self.fel_path.get().strip()})
             else:
                 indices = parse_indices(self.entry_idx.get())
                 params = {"indices": indices,
-                          "check_ring": not self.skip_ring_check_var.get()}
+                          "check_ring": not self.skip_ring_check_var.get(),
+                          **self._frame_range()}
                 if mode == "PDB":
                     params["pdb_files"] = self._selected_pdb_files()
                 else:
@@ -335,18 +366,22 @@ class PuckeringApp:
                 payload = {"mode": "FEL", "data": data, "prefix": prefix, "label": label}
             else:
                 ring_size = len(params["indices"])
-                ring_xyz, atom_names, base_name, times_ps = load_ring_coordinates(
-                    mode, **params)
+                selection = load_ring_coordinates(mode, **params)
+                atom_names = selection.atom_names
+                base_name = selection.base_name
                 self.root.after(0, self.status_var.set,
-                                f"Computing {ring_xyz.shape[0]} frame(s)...")
-                results = compute_puckering(ring_xyz)
+                                f"Computing {len(selection.frames)} frame(s)...")
+                results = compute_puckering(selection.xyz, selection.frames)
+                frame_range = describe_frame_range(selection.frames,
+                                                   selection.total_frames)
                 timestep, _note = resolve_timestep(
                     params.get("trajectory"), parse_timestep(self.timestep_var.get()),
                     len(results))
                 progress, progress_label = make_progress_axis(
-                    len(results), times_ps, timestep)
+                    selection.frames, selection.times_ps, timestep)
                 _dir, prefix, label = prepare_output_dir(job_name, base_name)
-                write_params_dat(results, f"{prefix}_params.dat", atom_names, ring_size)
+                write_params_dat(results, f"{prefix}_params.dat", atom_names,
+                                 ring_size, frame_range)
                 payload = {"mode": mode, "results": results, "prefix": prefix,
                            "label": label, "atom_names": atom_names,
                            "ring_size": ring_size, "overlay_surface": None,

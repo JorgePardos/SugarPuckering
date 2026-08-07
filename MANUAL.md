@@ -209,11 +209,38 @@ on a periodic axis but a line straight across the map if drawn literally.
 | GUI | CLI | Default | What it does |
 |---|---|---|---|
 | Ring Atom Indices | `--indices` | — | 6 indices for a pyranose, 5 for a furanose |
+| Frames: from / to / every | `--start` / `--stop` / `--stride` | whole trajectory | analyse only part of the run |
 | Timestep (ps/frame) | `--timestep` | blank | puts the per-frame plots on a time axis instead of frame numbers |
 | Skip the closed-ring check | `--skip-ring-check` | off | proceed even if the atoms are not bonded as a ring |
 | Project onto FEL | `--fel` | none | also draw the result on this free energy surface |
 | Angle units | `--angle-units` | `auto` | units of the projected surface |
 | Energy label | `--energy-label` | `Free Energy (kcal/mol)` | colourbar label of the projected surface |
+
+### Analysing part of a trajectory
+
+By default the whole run is analysed. `--start` and `--stop` restrict it to a window and `--stride`
+thins it — useful for dropping an equilibration phase, or for cutting a run too long to plot point by
+point.
+
+```bash
+python -m src.cli md --top system.prmtop --traj run.dcd --indices "..." --start 500          # from 500 on
+python -m src.cli md --top system.prmtop --traj run.dcd --indices "..." --start 500 --stop 1500
+python -m src.cli md --top system.prmtop --traj run.dcd --indices "..." --stride 10          # every 10th
+```
+
+Frame numbers are **1-based and the range is inclusive**, matching the numbers in the output table:
+`--start 3 --stop 7` gives you exactly the frames labelled 3 to 7.
+
+**The rows keep the frame numbers they had in the trajectory.** Analysing frames 100 to 200 produces a
+table numbered 100 to 200, not 1 to 101, so it still lines up against the file it came from. Time axes
+follow the same rule: with `--timestep 0.1`, frame 500 sits at 50 ps whether or not the analysis
+started there. The window is recorded in the output header —
+
+```
+# Analysed frames 100-200 every 5 (21 of 382)
+```
+
+— so a partial analysis cannot later be mistaken for a whole one.
 
 ### Putting the plots on a time axis
 
@@ -402,6 +429,12 @@ python -m src.cli fel --file fes.dat \
     --energy-label "Free Energy (kJ/mol)" --contour-step 5 --energy-max auto
 ```
 
+**Skipping an equilibration phase**
+
+```bash
+python -m src.cli md --top system.prmtop --traj run.nc --indices "..." --start 500 --job production
+```
+
 **Comparing several structures on one map** — pass them all at once; each becomes a frame:
 
 ```bash
@@ -421,6 +454,9 @@ you are sure the bond records are wrong.
 
 **`Atom index/indices [...] are outside the structure`** — the index exceeds the atom count. Remember
 indices are 1-based.
+
+**`Stop frame N is past the end`** / **`the range is empty`** — the frame window does not fit the
+trajectory. Frame numbers are 1-based and `--stop` is inclusive.
 
 **`Degenerate ring: the six atoms are exactly planar`** — the selected atoms are coplanar, so no
 puckering is defined. In practice this means the wrong atoms.

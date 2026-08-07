@@ -185,6 +185,63 @@ def test_missing_file_is_reported_clearly(tmp_path, capsys):
 
 
 # --------------------------------------------------------------------------
+# frame range
+# --------------------------------------------------------------------------
+
+def _many_frame_pdbs(tmp_path, count=10):
+    from test_furanose import make_furanose  # noqa: F401  (kept symmetric with above)
+
+    return [write_test_pdb(tmp_path / f"f{i}.pdb", make_ring(0.57, 20.0 + 6.0 * i, 90.0))
+            for i in range(count)]
+
+
+def test_a_frame_window_is_analysed_and_recorded(tmp_path, capsys):
+    paths = _many_frame_pdbs(tmp_path)
+    assert main(["pdb", "--files", *paths, "--indices", RING_INDICES_1BASED,
+                 "--start", "3", "--stop", "7",
+                 "--job", "win", "--outdir", str(tmp_path)]) == 0
+
+    assert "Analysing frames 3-7 (5 of 10)" in capsys.readouterr().out
+
+    dat = (tmp_path / "win" / "win_params.dat").read_text()
+    assert "# Analysed frames 3-7 (5 of 10)" in dat
+
+    numbers, _ = _read_params(str(tmp_path / "win" / "win_params.dat"))
+    # The rows keep the frame numbers they had in the input, not 1..5
+    assert list(numbers[:, 0]) == [3, 4, 5, 6, 7]
+
+
+def test_a_stride_thins_the_analysis(tmp_path, capsys):
+    paths = _many_frame_pdbs(tmp_path)
+    main(["pdb", "--files", *paths, "--indices", RING_INDICES_1BASED,
+          "--stride", "3", "--job", "thin", "--outdir", str(tmp_path)])
+
+    assert "every 3" in capsys.readouterr().out
+    numbers, _ = _read_params(str(tmp_path / "thin" / "thin_params.dat"))
+    assert list(numbers[:, 0]) == [1, 4, 7, 10]
+
+
+def test_the_whole_run_is_the_default(tmp_path, capsys):
+    paths = _many_frame_pdbs(tmp_path)
+    main(["pdb", "--files", *paths, "--indices", RING_INDICES_1BASED,
+          "--job", "all", "--outdir", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert "Analysing frames" not in out      # nothing to report when it is all of it
+    numbers, _ = _read_params(str(tmp_path / "all" / "all_params.dat"))
+    assert len(numbers) == 10
+    assert "# Analysed" not in (tmp_path / "all" / "all_params.dat").read_text()
+
+
+def test_an_out_of_range_window_is_reported(tmp_path, capsys):
+    paths = _many_frame_pdbs(tmp_path)
+    exit_code = main(["pdb", "--files", *paths, "--indices", RING_INDICES_1BASED,
+                      "--stop", "50", "--job", "bad", "--outdir", str(tmp_path)])
+    assert exit_code == 1
+    assert "past the end" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
 # the time axis
 # --------------------------------------------------------------------------
 

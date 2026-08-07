@@ -76,11 +76,12 @@ def test_auto_unit_detection_agrees_with_explicit_radians(tmp_path):
                     reason="tests/data/PDBs absent")
 def test_the_chair_structure_is_assigned_as_a_chair():
     pytest.importorskip("mdtraj")
-    ring_xyz, atom_names, _, _times = load_ring_coordinates(
+    selection = load_ring_coordinates(
         "PDB", _indices(PDB_RING), pdb_files=[os.path.join(PDB_DIR, "4C1.pdb")])
-    assert [n.split("-")[-1] for n in atom_names] == ["O5", "C1", "C2", "C3", "C4", "C5"]
+    assert [n.split("-")[-1] for n in selection.atom_names] == [
+        "O5", "C1", "C2", "C3", "C4", "C5"]
 
-    results = compute_puckering(ring_xyz)
+    results = compute_puckering(selection.xyz, selection.frames)
     assert get_strict_conformation(results[0, 2], results[0, 3]) == "4C1"
     assert 0.4 < results[0, 1] < 0.8  # a sensible pyranose amplitude, in Angstrom
 
@@ -88,11 +89,12 @@ def test_the_chair_structure_is_assigned_as_a_chair():
 @needs_traj
 def test_trajectory_ring_is_a_real_ring_and_gives_sane_values():
     pytest.importorskip("mdtraj")
-    ring_xyz, atom_names, _, _times = load_ring_coordinates(
+    selection = load_ring_coordinates(
         "MD", _indices(TRAJ_RING), topology=PRMTOP, trajectory=DCD)
-    assert [n.split("-")[-1] for n in atom_names] == ["O5", "C1", "C2", "C3", "C4", "C5"]
+    assert [n.split("-")[-1] for n in selection.atom_names] == [
+        "O5", "C1", "C2", "C3", "C4", "C5"]
 
-    results = compute_puckering(ring_xyz)
+    results = compute_puckering(selection.xyz, selection.frames)
     assert len(results) > 100
     assert np.isfinite(results).all()
     # Pyranose puckering amplitude stays near 0.6 A throughout a stable run.

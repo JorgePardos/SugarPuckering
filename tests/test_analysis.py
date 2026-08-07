@@ -15,6 +15,9 @@ from src.analysis import (
     compute_puckering,
     conformer_order,
     conformer_tex,
+    describe_frame_range,
+    parse_frame_number,
+    select_frames,
     load_fel,
     looks_like_frame_indices,
     make_progress_axis,
@@ -289,6 +292,102 @@ def test_contour_step_must_be_positive(value):
 def test_contour_step_must_be_a_number(value):
     with pytest.raises(AnalysisError, match="must be a number"):
         parse_contour_step(value)
+
+
+# --------------------------------------------------------------------------
+# frame range selection
+# --------------------------------------------------------------------------
+
+def test_the_whole_trajectory_is_the_default():
+    assert list(select_frames(5)) == [0, 1, 2, 3, 4]
+
+
+def test_the_range_is_one_based_and_inclusive():
+    """--start 2 --stop 4 means the frames printed as 2, 3 and 4."""
+    assert list(select_frames(10, start=2, stop=4)) == [1, 2, 3]
+
+
+def test_start_alone_runs_to_the_end():
+    assert list(select_frames(5, start=3)) == [2, 3, 4]
+
+
+def test_stop_alone_starts_at_the_beginning():
+    assert list(select_frames(5, stop=2)) == [0, 1]
+
+
+def test_stride_thins_the_selection():
+    assert list(select_frames(10, stride=3)) == [0, 3, 6, 9]
+
+
+def test_stride_applies_within_the_window():
+    assert list(select_frames(20, start=5, stop=15, stride=5)) == [4, 9, 14]
+
+
+def test_a_single_frame_can_be_selected():
+    assert list(select_frames(10, start=7, stop=7)) == [6]
+
+
+@pytest.mark.parametrize("kwargs, message", [
+    ({"start": 0}, "at least 1"),
+    ({"start": -3}, "at least 1"),
+    ({"stop": 99}, "past the end"),
+    ({"start": 8, "stop": 3}, "range is empty"),
+    ({"stride": 0}, "Stride must be at least 1"),
+])
+def test_bad_ranges_are_refused(kwargs, message):
+    with pytest.raises(AnalysisError, match=message):
+        select_frames(10, **kwargs)
+
+
+def test_a_full_selection_needs_no_description():
+    assert describe_frame_range(select_frames(6), 6) is None
+
+
+def test_a_partial_selection_is_described():
+    text = describe_frame_range(select_frames(20, start=5, stop=15), 20)
+    assert "frames 5-15" in text and "(11 of 20)" in text
+
+
+def test_a_strided_selection_says_so():
+    text = describe_frame_range(select_frames(20, stride=4), 20)
+    assert "every 4" in text
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, None), ("", None), ("  ", None), ("7", 7), (3, 3),
+])
+def test_frame_numbers_parse(value, expected):
+    assert parse_frame_number(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-2", "1.5", "last"])
+def test_bad_frame_numbers_are_refused(value):
+    with pytest.raises(AnalysisError):
+        parse_frame_number(value)
+
+
+def test_analysing_a_sub_range_keeps_the_original_frame_numbers():
+    """
+    Rows must carry the frame numbers they had in the trajectory, or the output
+    cannot be lined up against the file it came from.
+    """
+    frames = [make_ring(0.57, theta, 90.0) for theta in (20.0, 40.0, 60.0, 80.0)]
+    selected = select_frames(4, start=3)
+    results = compute_puckering(np.array(frames)[selected], selected)
+    assert list(results[:, COL_FRAME]) == [2.0, 3.0]   # 0-based; printed as 3 and 4
+
+
+def test_frame_numbers_must_match_the_coordinates():
+    frames = [make_ring(0.57, 40.0, 90.0)] * 3
+    with pytest.raises(AnalysisError, match="3 frames of coordinates"):
+        compute_puckering(np.array(frames), np.array([0, 1]))
+
+
+def test_a_sub_range_is_placed_correctly_on_the_time_axis():
+    """Frame 500 is at 500 * timestep, not at zero just because it is row one."""
+    values, label = make_progress_axis(np.array([499, 500, 501]), timestep_ps=0.1)
+    assert list(values) == pytest.approx([49.9, 50.0, 50.1])
+    assert label == "Time (ps)"
 
 
 # --------------------------------------------------------------------------
