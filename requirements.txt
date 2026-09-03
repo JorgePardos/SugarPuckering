@@ -1,0 +1,8 @@
+numpy>=1.20.0
+matplotlib>=3.3.0
+scipy>=1.6.0
+
+# NOTE: mdtraj is only needed for the PDB and MD trajectory modes; the FEL mode
+# and the whole test suite run without it. If you are on numpy 2.x you need a
+# recent mdtraj -- older releases were built against the numpy 1.x ABI.
+mdtraj>=1.9.0
